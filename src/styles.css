@@ -1,0 +1,197 @@
+@import "tailwindcss" source(none);
+@source "../src";
+@import "tw-animate-css";
+
+@custom-variant dark (&:is(.dark *));
+
+@theme inline {
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-gold: var(--gold);
+  --color-gold-foreground: var(--gold-foreground);
+  --color-success: var(--success);
+  --color-success-foreground: var(--success-foreground);
+  --color-warning: var(--warning);
+  --color-warning-foreground: var(--warning-foreground);
+  --color-surface: var(--surface);
+  --color-surface-elevated: var(--surface-elevated);
+  --color-lime: var(--lime);
+  --color-emerald-glow: var(--emerald-glow);
+  --font-display: "Space Grotesk", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, monospace;
+}
+
+:root {
+  --radius: 1.25rem;
+
+  /* Obsidian & Lime */
+  --background: oklch(0 0 0);                   /* #000 shell */
+  --foreground: oklch(0.94 0 0);                /* #ebebeb */
+
+  --surface: oklch(0.13 0 0);                   /* obsidian #0c0c0c */
+  --surface-elevated: oklch(0.17 0 0);
+
+  --card: oklch(0.13 0 0);
+  --card-foreground: oklch(0.94 0 0);
+  --popover: oklch(0.13 0 0);
+  --popover-foreground: oklch(0.94 0 0);
+
+  /* Bitcoin Gold accent — primary, gold, lime all mapped to gold so existing
+     classes glow gold without touching components. */
+  --primary: oklch(0.83 0.17 84);               /* #f7c948 */
+  --primary-foreground: oklch(0 0 0);
+
+  --secondary: oklch(0.18 0 0);
+  --secondary-foreground: oklch(0.94 0 0);
+
+  --muted: oklch(0.18 0 0);
+  --muted-foreground: oklch(0.94 0 0 / 60%);
+
+  --accent: oklch(0.83 0.17 84);
+  --accent-foreground: oklch(0 0 0);
+
+  --destructive: oklch(0.62 0.22 25);
+  --destructive-foreground: oklch(0.98 0 0);
+
+  /* Deep bronze as success */
+  --success: oklch(0.72 0.16 78);               /* #d4a017 */
+  --success-foreground: oklch(0 0 0);
+
+  --warning: oklch(0.85 0.18 95);
+  --warning-foreground: oklch(0 0 0);
+
+  --gold: oklch(0.83 0.17 84);
+  --gold-foreground: oklch(0 0 0);
+  --lime: oklch(0.83 0.17 84);                  /* alias → gold */
+  --emerald-glow: oklch(0.72 0.16 78);          /* alias → bronze gold */
+
+  --border: oklch(1 0 0 / 10%);                 /* white/10 */
+  --input: oklch(1 0 0 / 6%);
+  --ring: oklch(0.83 0.17 84 / 50%);
+
+  /* Glass + futurist gradients */
+  --gradient-hero: linear-gradient(180deg, oklch(0.14 0 0) 0%, oklch(0.08 0 0) 100%);
+  --gradient-gold: linear-gradient(135deg, oklch(0.9 0.17 88) 0%, oklch(0.83 0.17 84) 50%, oklch(0.62 0.14 75) 100%);
+  --gradient-green: linear-gradient(180deg, oklch(0.85 0.17 86) 0%, oklch(0.62 0.14 75) 100%);
+  --gradient-card: linear-gradient(180deg, oklch(1 0 0 / 4%) 0%, oklch(1 0 0 / 2%) 100%);
+
+  /* Glowing shadows */
+  --shadow-gold: 0 0 30px oklch(0.83 0.17 84 / 35%), 0 0 0 1px oklch(0.83 0.17 84 / 45%) inset;
+  --shadow-card: 0 1px 0 0 oklch(1 0 0 / 6%) inset, 0 20px 60px -20px oklch(0 0 0 / 80%);
+  --shadow-glow: 0 0 40px oklch(0.83 0.17 84 / 40%);
+}
+
+
+@theme inline {
+  --gradient-hero: var(--gradient-hero);
+  --gradient-gold: var(--gradient-gold);
+  --gradient-green: var(--gradient-green);
+  --gradient-card: var(--gradient-card);
+  --shadow-gold: var(--shadow-gold);
+  --shadow-card: var(--shadow-card);
+  --shadow-glow: var(--shadow-glow);
+}
+
+.dark { --background: oklch(0 0 0); }
+
+@layer base {
+  * { border-color: var(--color-border); }
+  html, body { background: var(--background); color: var(--foreground); }
+  body {
+    font-family: "Space Grotesk", ui-sans-serif, system-ui, sans-serif;
+    font-feature-settings: "ss01", "tnum";
+    letter-spacing: -0.01em;
+    -webkit-font-smoothing: antialiased;
+    background-color: #000;
+    background-image:
+      linear-gradient(oklch(1 0 0 / 4%) 1px, transparent 1px),
+      linear-gradient(90deg, oklch(1 0 0 / 4%) 1px, transparent 1px),
+      radial-gradient(700px 500px at 80% 10%, oklch(0.83 0.17 84 / 12%), transparent 60%),
+      radial-gradient(700px 500px at 10% 90%, oklch(0.62 0.14 75 / 10%), transparent 60%);
+    background-size: 60px 60px, 60px 60px, auto, auto;
+    background-attachment: fixed;
+    min-height: 100vh;
+  }
+  h1, h2, h3, h4 { font-family: "Space Grotesk", sans-serif; letter-spacing: -0.04em; }
+}
+
+@utility bg-gradient-hero { background-image: var(--gradient-hero); }
+@utility bg-gradient-gold { background-image: var(--gradient-gold); }
+@utility bg-gradient-green { background-image: var(--gradient-green); }
+@utility bg-gradient-card { background-image: var(--gradient-card); }
+@utility shadow-gold { box-shadow: var(--shadow-gold); }
+@utility shadow-card { box-shadow: var(--shadow-card); }
+@utility shadow-glow { box-shadow: var(--shadow-glow); }
+
+@utility glass {
+  background: oklch(1 0 0 / 3%);
+  backdrop-filter: blur(16px);
+  border: 1px solid oklch(1 0 0 / 10%);
+}
+@utility font-mono-tag {
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  text-transform: uppercase;
+  letter-spacing: 0.2em;
+  font-size: 10px;
+}
+
+@keyframes coin-spin {
+  0%   { transform: rotateY(0deg)   rotateX(8deg); }
+  100% { transform: rotateY(360deg) rotateX(8deg); }
+}
+@keyframes pulse-gold {
+  0%, 100% { box-shadow: 0 0 0 0 oklch(0.83 0.17 84 / 50%), 0 0 30px oklch(0.83 0.17 84 / 35%); }
+  50%      { box-shadow: 0 0 0 10px oklch(0.83 0.17 84 / 0%),  0 0 50px oklch(0.83 0.17 84 / 45%); }
+}
+@keyframes shimmer {
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+@keyframes count-up {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+@keyframes float {
+  0%, 100% { transform: translateY(0); }
+  50%      { transform: translateY(-10px); }
+}
+
+@utility animate-coin-spin { animation: coin-spin 8s linear infinite; }
+@utility animate-pulse-gold { animation: pulse-gold 2.4s ease-out infinite; }
+@utility animate-float { animation: float 6s ease-in-out infinite; }
+@utility animate-count-up { animation: count-up .35s ease-out; }
+@utility no-scrollbar {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+  &::-webkit-scrollbar { display: none; }
+}
+@utility shimmer-text {
+  background: linear-gradient(90deg, var(--foreground) 0%, var(--lime) 50%, var(--foreground) 100%);
+  background-size: 200% auto;
+  background-clip: text;
+  -webkit-background-clip: text;
+  color: transparent;
+  animation: shimmer 5s linear infinite;
+  letter-spacing: -0.03em;
+}
