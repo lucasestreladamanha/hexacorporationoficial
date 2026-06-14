@@ -1,5 +1,5 @@
-import { createFileRoute } from "@tanstack/react-router";
-import { useMemo, useState } from "react";
+import { createFileRoute, Link } from "@tanstack/react-router";
+import { useEffect, useMemo, useState } from "react";
 import {
   ArrowRight,
   Check,
@@ -20,55 +20,74 @@ import {
   Scale,
   Activity,
   Store,
-  User,
+  User as UserIcon,
+  Clock,
+  ShieldCheck,
 } from "lucide-react";
 import { HexaCoin } from "@/components/HexaCoin";
 import { Stepper } from "@/components/Stepper";
+import {
+  WALLET_ADDRESS,
+  SUPPORT_EMAIL,
+  useBtcPrice,
+  useMarket,
+  useStore,
+  signUp,
+  logIn,
+  logOut,
+  submitKyc,
+  createDeposit,
+  createWithdraw,
+  fmtBRL,
+  fmtBTC,
+  type User,
+} from "@/lib/hexa-store";
 
 export const Route = createFileRoute("/")({
   head: () => ({
     meta: [
-      { title: "Hexa — Arbitragem de Funding Rate em Bitcoin" },
+      { title: "Hexa Corp — Arbitragem de Funding Rate em Bitcoin" },
       {
         name: "description",
         content:
-          "Plataforma institucional de arbitragem de funding rate. Rendimento delta-neutro em BTC, independente da direção do mercado. Bônus de 30% no primeiro aporte.",
+          "Hexa Corp · Plataforma institucional de arbitragem delta-neutra em BTC. Bônus de 30% no primeiro aporte.",
       },
-      { property: "og:title", content: "Hexa — Arbitragem de Funding Rate em BTC" },
+      { property: "og:title", content: "Hexa Corp — Yield em BTC delta-neutro" },
       {
         property: "og:description",
-        content: "Capture o diferencial de funding rate entre exchanges com posições delta-neutras. Rendimento em BTC, risco de mercado neutralizado.",
+        content: "Capture o diferencial de funding rate entre exchanges com posições delta-neutras.",
       },
     ],
   }),
   component: Funnel,
 });
 
-const BTC_RATE_BRL = 350_000;
-const fmtBRL = (v: number) =>
-  v.toLocaleString("pt-BR", { style: "currency", currency: "BRL", minimumFractionDigits: 2, maximumFractionDigits: 2 });
-const fmtBTC = (v: number) =>
-  `${v.toLocaleString("pt-BR", { minimumFractionDigits: 6, maximumFractionDigits: 8 })} BTC`;
-
 type Step =
   | "landing"
   | "auth"
+  | "kyc"
+  | "kyc-pending"
   | "claim"
   | "deposit"
   | "payment"
   | "confirmed"
   | "dashboard";
 
-// Stepper only used in the SIGN-UP funnel. Login jumps straight to dashboard.
-const SIGNUP_STEPS: Step[] = ["auth", "claim", "deposit", "payment", "confirmed"];
+const SIGNUP_STEPS: Step[] = ["auth", "kyc", "claim", "deposit", "payment", "confirmed"];
 
 function Funnel() {
+  const db = useStore();
+  const currentUser = db.sessionUserId
+    ? db.users.find((u) => u.id === db.sessionUserId) ?? null
+    : null;
+
   const [step, setStep] = useState<Step>("landing");
   const [authMode, setAuthMode] = useState<"signup" | "login">("signup");
-  const [depositBTC, setDepositBTC] = useState<string>("0.01");
 
-  const depositNum = Math.max(0, Number(depositBTC) || 0);
-  const balanceBTC = depositNum * 2;
+  // If logged in but at landing, send to dashboard.
+  useEffect(() => {
+    if (currentUser && step === "landing") setStep("dashboard");
+  }, [currentUser, step]);
 
   const go = (s: Step) => {
     setStep(s);
@@ -76,8 +95,8 @@ function Funnel() {
   };
 
   const isWide = step === "landing" || step === "dashboard";
-  // Stepper only visible during the signup funnel — never during login flow.
-  const showStepper = authMode === "signup" && SIGNUP_STEPS.includes(step) && step !== "auth";
+  const showStepper =
+    authMode === "signup" && SIGNUP_STEPS.includes(step) && step !== "auth";
   const stepIdx = SIGNUP_STEPS.indexOf(step);
 
   return (
@@ -94,7 +113,13 @@ function Funnel() {
           style={{ background: "radial-gradient(circle, oklch(0.72 0.16 78 / 22%) 0%, transparent 70%)", filter: "blur(120px)" }}
         />
 
-        <Header onHome={() => go("landing")} showDashboardLink={step === "dashboard"} />
+        <Header
+          onHome={() => {
+            if (currentUser) go("dashboard");
+            else go("landing");
+          }}
+          showDashboardLink={step === "dashboard"}
+        />
 
         <main className={`relative flex-1 mx-auto w-full ${isWide ? "max-w-6xl" : "max-w-md"} px-4 sm:px-5 pb-24 pt-4 sm:pt-6`}>
           {showStepper && (
@@ -104,31 +129,45 @@ function Funnel() {
           )}
 
           <div key={step} className="animate-count-up">
-            {step === "landing" && <Landing onStart={() => { setAuthMode("signup"); go("auth"); }} onLogin={() => { setAuthMode("login"); go("auth"); }} />}
+            {step === "landing" && (
+              <Landing
+                onStart={() => { setAuthMode("signup"); go("auth"); }}
+                onLogin={() => { setAuthMode("login"); go("auth"); }}
+              />
+            )}
             {step === "auth" && (
               <Auth
                 mode={authMode}
                 onModeChange={setAuthMode}
-                onSignup={() => go("claim")}
-                onLogin={() => go("dashboard")}
+                onSignupDone={() => go("kyc")}
+                onLoginDone={() => go("dashboard")}
               />
+            )}
+            {step === "kyc" && currentUser && (
+              <KycForm user={currentUser} onSubmitted={() => go("kyc-pending")} />
+            )}
+            {step === "kyc-pending" && currentUser && (
+              <KycPending user={currentUser} onContinue={() => go("claim")} />
             )}
             {step === "claim" && <Claim onNext={() => go("deposit")} />}
-            {step === "deposit" && (
-              <Deposit
-                value={depositBTC}
-                onChange={setDepositBTC}
-                onNext={() => go("payment")}
+            {step === "deposit" && currentUser && (
+              <DepositFlow
+                user={currentUser}
+                onPayment={() => go("payment")}
+                onConfirmed={() => go("dashboard")}
+                renderStep="deposit"
               />
             )}
-            {step === "payment" && (
-              <Payment amountBTC={depositNum} onNext={() => go("confirmed")} />
+            {step === "payment" && currentUser && (
+              <DepositFlow
+                user={currentUser}
+                onPayment={() => go("payment")}
+                onConfirmed={() => go("dashboard")}
+                renderStep="payment"
+              />
             )}
-            {step === "confirmed" && (
-              <Confirmed amountBTC={depositNum} onNext={() => go("dashboard")} />
-            )}
-            {step === "dashboard" && (
-              <Dashboard balanceBTC={balanceBTC} depositBTC={depositNum} />
+            {step === "dashboard" && currentUser && (
+              <Dashboard user={currentUser} onLogout={() => { logOut(); go("landing"); }} />
             )}
           </div>
         </main>
@@ -146,7 +185,7 @@ function Header({ onHome, showDashboardLink }: { onHome: () => void; showDashboa
         <button onClick={onHome} className="leading-tight text-left">
           <div className="text-sm font-semibold tracking-tight flex items-center gap-2">
             <span className="inline-block h-2 w-2 rounded-full bg-lime" />
-            Hexa
+            Hexa Corp
           </div>
           <div className="font-mono-tag text-white/50 -mt-0.5">Funding Rate Arbitrage</div>
         </button>
@@ -166,8 +205,9 @@ function Header({ onHome, showDashboardLink }: { onHome: () => void; showDashboa
 function Footer() {
   return (
     <footer className="relative mx-auto max-w-6xl w-full px-4 sm:px-5 py-8">
-      <div className="border-t border-white/10 pt-6 space-y-3">
-        <div className="font-mono-tag text-white/30">© 2026 HEXA · TODOS OS DIREITOS RESERVADOS</div>
+      <div className="border-t border-white/10 pt-6 flex flex-wrap items-center justify-between gap-3">
+        <div className="font-mono-tag text-white/30">© 2026 HEXA CORP · TODOS OS DIREITOS RESERVADOS</div>
+        <Link to="/admin" className="font-mono-tag text-white/30 hover:text-lime transition">ADMIN →</Link>
       </div>
     </footer>
   );
@@ -178,7 +218,6 @@ function Footer() {
 function Landing({ onStart, onLogin }: { onStart: () => void; onLogin: () => void }) {
   return (
     <div className="space-y-20 sm:space-y-24">
-      {/* HERO */}
       <section className="grid md:grid-cols-2 gap-10 items-center pt-4">
         <div className="space-y-6">
           <div className="font-mono-tag text-lime">// FUNDING RATE ARBITRAGE</div>
@@ -197,10 +236,9 @@ function Landing({ onStart, onLogin }: { onStart: () => void; onLogin: () => voi
             </span>
           </h1>
           <p className="text-white/70 leading-relaxed max-w-xl">
-            A Hexa opera arbitragem de <span className="text-lime">funding rate</span> entre exchanges
-            de derivativos. Posições <b className="text-white">delta-neutras</b> (long spot + short perpétuo)
-            capturam o diferencial pago entre traders alavancados — gerando yield em Bitcoin
-            independentemente da direção do mercado.
+            A <b>Hexa Corp</b> opera arbitragem de <span className="text-lime">funding rate</span> entre exchanges
+            de derivativos. Posições <b className="text-white">delta-neutras</b> capturam o diferencial pago
+            entre traders alavancados — gerando yield em Bitcoin independentemente da direção do mercado.
           </p>
 
           <div className="grid grid-cols-3 gap-3 max-w-xl">
@@ -239,71 +277,39 @@ function Landing({ onStart, onLogin }: { onStart: () => void; onLogin: () => voi
         </div>
 
         <div className="flex justify-center">
-          <div className="animate-float">
-            <HexaCoin size={300} />
-          </div>
+          <div className="animate-float"><HexaCoin size={300} /></div>
         </div>
       </section>
 
-      {/* TESE */}
       <section id="tese" className="space-y-8">
-        <SectionHeading
-          tag="A TESE"
-          title="Funding rate é o motor invisível dos derivativos cripto"
-        />
+        <SectionHeading tag="A TESE" title="Funding rate é o motor invisível dos derivativos cripto" />
         <div className="grid md:grid-cols-2 gap-6">
           <p className="text-white/70 leading-relaxed">
             Em contratos perpétuos, o <span className="text-lime">funding rate</span> é o pagamento periódico
-            entre quem está comprado e quem está vendido — usado para ancorar o preço do perpétuo ao
-            spot. Em mercados otimistas, longs pagam shorts. Em mercados pessimistas, shorts pagam longs.
+            entre quem está comprado e quem está vendido. Em mercados otimistas, longs pagam shorts.
           </p>
           <p className="text-white/70 leading-relaxed">
-            A Hexa fica neutra: <b className="text-white">comprada no spot</b> e <b className="text-white">vendida
-            no perpétuo</b>, sempre na mesma quantidade. O movimento do BTC se cancela. O que sobra
-            é o funding — pago a cada 8 horas, capturado em BTC, 24/7.
+            A Hexa Corp fica neutra: <b className="text-white">comprada no spot</b> e <b className="text-white">vendida
+            no perpétuo</b>, sempre na mesma quantidade. O que sobra é o funding — pago a cada 8h, em BTC, 24/7.
           </p>
         </div>
       </section>
 
-      {/* COMO FUNCIONA */}
       <section id="como" className="space-y-8">
         <SectionHeading tag="COMO FUNCIONA" title="Quatro passos, posição delta-neutra" />
         <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-4">
-          <StepCard
-            n={1}
-            icon={<Wallet className="h-5 w-5" />}
-            title="Você aporta em BTC"
-            text="O capital entra integralmente em Bitcoin, em custódia institucional segregada."
-          />
-          <StepCard
-            n={2}
-            icon={<Scale className="h-5 w-5" />}
-            title="Posição equilibrada"
-            text="Compramos BTC no spot e abrimos short equivalente no perpétuo. Exposição líquida ≈ 0."
-          />
-          <StepCard
-            n={3}
-            icon={<Activity className="h-5 w-5" />}
-            title="Captura de funding"
-            text="A cada 8h o funding rate é creditado. Quando negativo, rebalanceamos entre exchanges."
-          />
-          <StepCard
-            n={4}
-            icon={<Zap className="h-5 w-5" />}
-            title="Yield em BTC"
-            text="O rendimento se acumula em sats. Saldo total e histórico transparentes no painel."
-          />
+          <StepCard n={1} icon={<Wallet className="h-5 w-5" />} title="Você aporta em BTC" text="Capital em custódia institucional segregada." />
+          <StepCard n={2} icon={<Scale className="h-5 w-5" />} title="Posição equilibrada" text="Long spot + short perpétuo. Exposição líquida ≈ 0." />
+          <StepCard n={3} icon={<Activity className="h-5 w-5" />} title="Captura de funding" text="A cada 8h o funding rate é creditado." />
+          <StepCard n={4} icon={<Zap className="h-5 w-5" />} title="Yield em BTC" text="Saldo e histórico transparentes no painel." />
         </div>
       </section>
 
-      {/* PERFORMANCE */}
       <section id="performance" className="grid md:grid-cols-2 gap-10 items-center">
         <div className="space-y-5">
           <SectionHeading tag="PERFORMANCE" title="Yield consistente, descorrelacionado" inline />
           <p className="text-white/70 leading-relaxed">
-            Nosso retorno depende do <span className="text-lime">spread de funding</span> entre venues —
-            não do preço do BTC. Em mercados de alta euforia, os retornos sobem. Em correções, a
-            estratégia segue capturando rate em magnitude reduzida.
+            Nosso retorno depende do <span className="text-lime">spread de funding</span> entre venues — não do preço do BTC.
           </p>
           <div className="grid grid-cols-3 gap-3">
             <StatChip label="APY 12M" value="18,4%" />
@@ -325,52 +331,18 @@ function Landing({ onStart, onLogin }: { onStart: () => void; onLogin: () => voi
         </div>
       </section>
 
-      {/* POR QUE */}
-      <section className="space-y-8">
-        <SectionHeading tag="POR QUE HEXA" title="Vantagens estruturais" />
-        <div className="grid md:grid-cols-2 gap-4">
-          <FeatureCard
-            icon={<Scale className="h-5 w-5" />}
-            title="Delta-neutro de verdade"
-            text="A posição é rebalanceada continuamente para manter exposição líquida ao preço próxima de zero."
-          />
-          <FeatureCard
-            icon={<Layers className="h-5 w-5" />}
-            title="Execução multi-exchange"
-            text="Rodamos em paralelo nas principais venues — Binance, Bybit, OKX, Deribit — capturando o melhor funding disponível."
-          />
-          <FeatureCard
-            icon={<Building2 className="h-5 w-5" />}
-            title="Custódia institucional"
-            text="Cold storage segregado, prova-de-reservas on-chain e segregação por cliente."
-          />
-          <FeatureCard
-            icon={<LineChart className="h-5 w-5" />}
-            title="Transparência total"
-            text="Histórico de funding rate capturado, taxas e PnL disponíveis em tempo real no painel."
-          />
-        </div>
-      </section>
-
-      {/* BÔNUS */}
       <section id="bonus" className="space-y-8">
         <SectionHeading tag="BÔNUS" title="Yield acelerado de boas-vindas" />
         <div className="rounded-[2rem] p-8 sm:p-10 text-center relative overflow-hidden border border-lime/30"
           style={{ background: "linear-gradient(180deg, oklch(0.83 0.17 84 / 8%) 0%, oklch(0.13 0 0) 100%)" }}
         >
-          <div className="absolute -top-10 -right-10 opacity-30">
-            <HexaCoin size={180} />
-          </div>
+          <div className="absolute -top-10 -right-10 opacity-30"><HexaCoin size={180} /></div>
           <div className="relative space-y-5">
             <div className="font-mono-tag text-lime">RECOMPENSA DE BOAS-VINDAS</div>
-            <div className="text-6xl sm:text-7xl font-semibold tracking-[-0.06em] shimmer-text">
-              +30%
-            </div>
+            <div className="text-6xl sm:text-7xl font-semibold tracking-[-0.06em] shimmer-text">+30%</div>
             <p className="text-white/70 max-w-xl mx-auto">
-              Receba <b className="text-white">+30% em BTC</b> creditados imediatamente ao primeiro aporte.
-              Equivalente a meses de yield antecipados, depositados direto no seu saldo.
+              Receba <b className="text-white">+30% em BTC</b> creditados no primeiro aporte, após aprovação.
             </p>
-            <div className="font-mono-tag text-white/40">OFERTA VÁLIDA APENAS PARA NOVOS CLIENTES</div>
             <button
               onClick={onStart}
               className="inline-flex items-center gap-2 rounded-full bg-lime text-black font-bold tracking-tight px-7 py-4 text-sm transition-all duration-300 hover:scale-[1.02]"
@@ -381,26 +353,6 @@ function Landing({ onStart, onLogin }: { onStart: () => void; onLogin: () => voi
           </div>
         </div>
       </section>
-
-      {/* CTA FINAL */}
-      <section className="rounded-[2rem] p-8 sm:p-10 text-center border border-white/10 space-y-5"
-        style={{ background: "linear-gradient(180deg, oklch(0.17 0 0) 0%, oklch(0.08 0 0) 100%)" }}
-      >
-        <h2 className="text-3xl sm:text-4xl font-semibold tracking-[-0.05em]">
-          Renda em BTC, sem adivinhar o mercado
-        </h2>
-        <p className="text-white/70 max-w-2xl mx-auto">
-          Faça seu primeiro aporte e receba <b className="text-lime">30% em BTC imediato</b>.
-          Estratégia delta-neutra, execução institucional, yield 24/7.
-        </p>
-        <button
-          onClick={onStart}
-          className="inline-flex items-center gap-2 rounded-full bg-lime text-black font-bold tracking-tight px-8 py-4 text-sm transition-all duration-300 hover:scale-[1.02]"
-          style={{ boxShadow: "0 0 30px oklch(0.83 0.17 84 / 35%)" }}
-        >
-          Abrir minha conta <ArrowRight className="h-5 w-5" />
-        </button>
-      </section>
     </div>
   );
 }
@@ -410,20 +362,6 @@ function SectionHeading({ tag, title, inline }: { tag: string; title: string; in
     <div className={inline ? "space-y-3" : "space-y-3 text-center max-w-3xl mx-auto"}>
       <div className="font-mono-tag text-lime">// {tag}</div>
       <h2 className="text-3xl sm:text-4xl font-semibold tracking-[-0.05em] leading-tight">{title}</h2>
-    </div>
-  );
-}
-
-function FeatureCard({ icon, title, text }: { icon?: React.ReactNode; title: string; text: string }) {
-  return (
-    <div className="rounded-2xl glass p-6 space-y-3 hover:border-lime/40 transition">
-      {icon && (
-        <div className="h-10 w-10 rounded-xl bg-lime/15 text-lime flex items-center justify-center">
-          {icon}
-        </div>
-      )}
-      <div className="font-semibold text-lg tracking-tight">{title}</div>
-      <p className="text-sm text-white/65 leading-relaxed">{text}</p>
     </div>
   );
 }
@@ -453,7 +391,6 @@ function StatChip({ label, value }: { label: string; value: string }) {
 /* ---------- YIELD CHART ---------- */
 
 function YieldChart({ height = 160 }: { height?: number }) {
-  // Stable pseudo-random walk for a yield curve (~+18% over 12 months)
   const points = useMemo(() => {
     const n = 60;
     const seed = 7;
@@ -464,7 +401,6 @@ function YieldChart({ height = 160 }: { height?: number }) {
       v += 0.3 + noise * 0.35;
       arr.push(Math.max(0, v));
     }
-    // normalize to end at ~18
     const last = arr[arr.length - 1];
     const scale = 18 / last;
     return arr.map((x) => x * scale);
@@ -474,10 +410,8 @@ function YieldChart({ height = 160 }: { height?: number }) {
   const H = height;
   const pad = 8;
   const max = Math.max(...points);
-  const min = 0;
   const xStep = (W - pad * 2) / (points.length - 1);
-  const yFor = (v: number) => H - pad - ((v - min) / (max - min)) * (H - pad * 2);
-
+  const yFor = (v: number) => H - pad - (v / max) * (H - pad * 2);
   const path = points.map((v, i) => `${i === 0 ? "M" : "L"} ${pad + i * xStep} ${yFor(v)}`).join(" ");
   const area = `${path} L ${pad + (points.length - 1) * xStep} ${H - pad} L ${pad} ${H - pad} Z`;
 
@@ -489,7 +423,6 @@ function YieldChart({ height = 160 }: { height?: number }) {
           <stop offset="100%" stopColor="oklch(0.83 0.17 84)" stopOpacity="0" />
         </linearGradient>
       </defs>
-      {/* grid */}
       {[0.25, 0.5, 0.75].map((g) => (
         <line key={g} x1={pad} x2={W - pad} y1={pad + g * (H - pad * 2)} y2={pad + g * (H - pad * 2)} stroke="oklch(1 0 0 / 6%)" strokeDasharray="3 4" />
       ))}
@@ -503,27 +436,43 @@ function YieldChart({ height = 160 }: { height?: number }) {
 /* ---------- AUTH ---------- */
 
 function Auth({
-  mode, onModeChange, onSignup, onLogin,
+  mode, onModeChange, onSignupDone, onLoginDone,
 }: {
   mode: "signup" | "login";
   onModeChange: (m: "signup" | "login") => void;
-  onSignup: () => void;
-  onLogin: () => void;
+  onSignupDone: () => void;
+  onLoginDone: () => void;
 }) {
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
-  const valid =
-    email.includes("@") &&
-    password.length >= 6 &&
-    (mode === "login" || name.trim().length >= 2);
+  const valid = email.includes("@") && password.length >= 6 && (mode === "login" || name.trim().length >= 2);
+
+  const submit = () => {
+    setError(null);
+    setLoading(true);
+    setTimeout(() => {
+      if (mode === "signup") {
+        const r = signUp({ name, email, password });
+        setLoading(false);
+        if ("error" in r) return setError(r.error);
+        onSignupDone();
+      } else {
+        const r = logIn(email, password);
+        setLoading(false);
+        if ("error" in r) return setError(r.error);
+        onLoginDone();
+      }
+    }, 500);
+  };
 
   return (
     <div className="space-y-5">
       <SectionTitle
-        title={mode === "signup" ? "Crie sua conta Hexa" : "Acesse sua conta"}
+        title={mode === "signup" ? "Crie sua conta Hexa Corp" : "Acesse sua conta"}
         subtitle={
           mode === "signup"
             ? "Cadastre-se em 1 minuto e ative o bônus de 30% no primeiro aporte."
@@ -548,50 +497,30 @@ function Auth({
       <div className="rounded-[2rem] glass p-5 space-y-3">
         {mode === "signup" && (
           <Field label="NOME COMPLETO">
-            <input
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              placeholder="Seu nome"
-              className="w-full rounded-xl bg-white/[0.04] border border-white/10 px-4 py-3.5 text-sm outline-none focus:border-lime focus:ring-2 focus:ring-lime/30 transition placeholder:text-white/30"
-            />
+            <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Seu nome" className={inputCls} />
           </Field>
         )}
 
         <Field label="E-MAIL">
           <div className="relative">
             <Mail className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-white/40" />
-            <input
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              type="email"
-              placeholder="voce@email.com"
-              className="w-full rounded-xl bg-white/[0.04] border border-white/10 pl-10 pr-4 py-3.5 text-sm outline-none focus:border-lime focus:ring-2 focus:ring-lime/30 transition placeholder:text-white/30"
-            />
+            <input value={email} onChange={(e) => setEmail(e.target.value)} type="email" placeholder="voce@email.com" className={inputCls + " pl-10"} />
           </div>
         </Field>
 
         <Field label="SENHA">
           <div className="relative">
             <Lock className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-white/40" />
-            <input
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              type="password"
-              placeholder="••••••••"
-              className="w-full rounded-xl bg-white/[0.04] border border-white/10 pl-10 pr-4 py-3.5 text-sm outline-none focus:border-lime focus:ring-2 focus:ring-lime/30 transition placeholder:text-white/30"
-            />
+            <input value={password} onChange={(e) => setPassword(e.target.value)} type="password" placeholder="••••••••" className={inputCls + " pl-10"} />
           </div>
         </Field>
 
+        {error && (
+          <div className="rounded-xl bg-red-500/10 border border-red-500/30 p-3 text-xs text-red-300">{error}</div>
+        )}
       </div>
 
-      <PrimaryButton
-        onClick={() => {
-          setLoading(true);
-          setTimeout(() => (mode === "signup" ? onSignup() : onLogin()), 700);
-        }}
-        disabled={!valid || loading}
-      >
+      <PrimaryButton onClick={submit} disabled={!valid || loading}>
         {loading ? (
           <><Loader2 className="h-5 w-5 animate-spin" /> {mode === "signup" ? "Criando conta…" : "Entrando…"}</>
         ) : (
@@ -602,6 +531,9 @@ function Auth({
   );
 }
 
+const inputCls =
+  "w-full rounded-xl bg-white/[0.04] border border-white/10 px-4 py-3.5 text-sm outline-none focus:border-lime focus:ring-2 focus:ring-lime/30 transition placeholder:text-white/30";
+
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <div className="space-y-1.5">
@@ -611,31 +543,124 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
   );
 }
 
-/* ---------- CLAIM (signup only) ---------- */
+/* ---------- KYC (Identificação) ---------- */
+
+function KycForm({ user, onSubmitted }: { user: User; onSubmitted: () => void }) {
+  const [cpf, setCpf] = useState(user.cpf ?? "");
+  const [birthDate, setBirthDate] = useState(user.birthDate ?? "");
+  const [phone, setPhone] = useState(user.phone ?? "");
+  const [address, setAddress] = useState(user.address ?? "");
+  const [city, setCity] = useState(user.city ?? "");
+  const [state, setState] = useState(user.state ?? "");
+  const [zip, setZip] = useState(user.zip ?? "");
+  const [loading, setLoading] = useState(false);
+
+  const valid =
+    cpf.replace(/\D/g, "").length === 11 &&
+    birthDate.length === 10 &&
+    phone.replace(/\D/g, "").length >= 10 &&
+    address.trim().length >= 5 &&
+    city.trim().length >= 2 &&
+    state.trim().length === 2 &&
+    zip.replace(/\D/g, "").length === 8;
+
+  return (
+    <div className="space-y-5">
+      <SectionTitle
+        title="Identificação"
+        subtitle="Conforme exigência regulatória (KYC), precisamos confirmar seus dados antes de liberar o painel."
+      />
+
+      <div className="rounded-[2rem] glass p-5 space-y-3">
+        <Field label="CPF"><input value={cpf} onChange={(e) => setCpf(maskCPF(e.target.value))} placeholder="000.000.000-00" className={inputCls} /></Field>
+        <div className="grid grid-cols-2 gap-3">
+          <Field label="DATA DE NASCIMENTO"><input value={birthDate} onChange={(e) => setBirthDate(maskDate(e.target.value))} placeholder="DD/MM/AAAA" className={inputCls} /></Field>
+          <Field label="TELEFONE"><input value={phone} onChange={(e) => setPhone(maskPhone(e.target.value))} placeholder="(11) 99999-0000" className={inputCls} /></Field>
+        </div>
+        <Field label="ENDEREÇO"><input value={address} onChange={(e) => setAddress(e.target.value)} placeholder="Rua, número e complemento" className={inputCls} /></Field>
+        <div className="grid grid-cols-[1fr_80px_120px] gap-3">
+          <Field label="CIDADE"><input value={city} onChange={(e) => setCity(e.target.value)} className={inputCls} /></Field>
+          <Field label="UF"><input value={state} onChange={(e) => setState(e.target.value.toUpperCase().slice(0, 2))} className={inputCls} /></Field>
+          <Field label="CEP"><input value={zip} onChange={(e) => setZip(maskCep(e.target.value))} placeholder="00000-000" className={inputCls} /></Field>
+        </div>
+
+        <div className="rounded-xl bg-lime/10 border border-lime/30 p-3 text-xs text-white/80 flex items-start gap-2">
+          <ShieldCheck className="h-4 w-4 text-lime shrink-0 mt-0.5" />
+          <span>Seus dados serão analisados manualmente pelo nosso time. A aprovação leva poucos minutos.</span>
+        </div>
+      </div>
+
+      <PrimaryButton
+        onClick={() => {
+          setLoading(true);
+          setTimeout(() => {
+            submitKyc(user.id, { cpf, birthDate, phone, address, city, state, zip });
+            setLoading(false);
+            onSubmitted();
+          }, 700);
+        }}
+        disabled={!valid || loading}
+      >
+        {loading ? (
+          <><Loader2 className="h-5 w-5 animate-spin" /> Enviando…</>
+        ) : (
+          <>Enviar para análise <ArrowRight className="h-5 w-5" /></>
+        )}
+      </PrimaryButton>
+    </div>
+  );
+}
+
+function KycPending({ user, onContinue }: { user: User; onContinue: () => void }) {
+  const approved = user.kycStatus === "approved";
+  return (
+    <div className="space-y-5 text-center">
+      <div className="flex justify-center pt-2">
+        <div className={`h-20 w-20 rounded-full flex items-center justify-center ${approved ? "bg-lime/20 animate-pulse-gold" : "bg-warning/15"}`}>
+          {approved ? <Check className="h-10 w-10 text-lime" /> : <Clock className="h-10 w-10 text-warning" />}
+        </div>
+      </div>
+      <SectionTitle
+        title={approved ? "Cadastro aprovado" : "Cadastro em análise"}
+        subtitle={
+          approved
+            ? "Seus dados foram aprovados. Você pode avançar para o aporte."
+            : "Nosso time está revisando seus dados. Assim que aprovado você poderá depositar e receber o bônus."
+        }
+      />
+      <div className="rounded-[2rem] glass p-5 space-y-2 text-left">
+        <Row label="Nome" value={user.name} />
+        <Row label="CPF" value={user.cpf ?? "—"} />
+        <Row label="Status" value={user.kycStatus.toUpperCase()} highlight={approved} />
+      </div>
+      <PrimaryButton onClick={onContinue} disabled={!approved}>
+        {approved ? <>Continuar para o aporte <ArrowRight className="h-5 w-5" /></> : "Aguardando aprovação…"}
+      </PrimaryButton>
+    </div>
+  );
+}
+
+/* ---------- CLAIM ---------- */
 
 function Claim({ onNext }: { onNext: () => void }) {
   return (
     <div className="space-y-5">
       <SectionTitle
         title="Ative seu bônus de boas-vindas"
-        subtitle="Como novo cliente, você tem direito a +30% em BTC creditados imediatamente no primeiro aporte."
+        subtitle="Como novo cliente, você tem direito a +30% em BTC creditados após a aprovação do primeiro aporte."
       />
-
       <div className="rounded-[2rem] glass p-6 space-y-4">
         <div className="flex justify-center"><HexaCoin size={104} /></div>
         <div className="text-center space-y-1">
           <div className="font-mono-tag text-white/50">YIELD ACELERADO DE BOAS-VINDAS</div>
           <div className="text-5xl font-semibold tracking-[-0.06em] shimmer-text">+30%</div>
-          <div className="text-xs text-white/60">Creditado em BTC após confirmação do depósito</div>
+          <div className="text-xs text-white/60">Creditado em BTC após confirmação manual do depósito</div>
         </div>
-        <BenefitRow text="Crédito imediato em BTC após confirmação on-chain" />
-        <BenefitRow text="Estratégia delta-neutra ativa 24/7 a partir do primeiro sat" />
-        <BenefitRow text="Painel transparente de funding capturado e PnL" />
+        <BenefitRow text="Crédito em BTC após aprovação do depósito" />
+        <BenefitRow text="Estratégia delta-neutra ativa 24/7" />
+        <BenefitRow text="Painel transparente de funding capturado" />
       </div>
-
-      <PrimaryButton onClick={onNext}>
-        Continuar para o aporte <ArrowRight className="h-5 w-5" />
-      </PrimaryButton>
+      <PrimaryButton onClick={onNext}>Continuar para o aporte <ArrowRight className="h-5 w-5" /></PrimaryButton>
     </div>
   );
 }
@@ -649,199 +674,220 @@ function BenefitRow({ text }: { text: string }) {
   );
 }
 
-/* ---------- DEPOSIT ---------- */
+/* ---------- DEPOSIT FLOW (BRL → BTC) ---------- */
 
-function Deposit({
-  value, onChange, onNext,
-}: { value: string; onChange: (v: string) => void; onNext: () => void }) {
-  const [loading, setLoading] = useState(false);
-  const num = Number(value) || 0;
-  const valid = num >= 0.0005;
-  const brlEquiv = num * BTC_RATE_BRL;
-  const quickBTC = [0.005, 0.01, 0.05, 0.1];
-  const quickBRL = [500, 1000, 5000, 10000];
-  const setFromBRL = (brl: number) => {
-    const btc = brl / BTC_RATE_BRL;
-    // 8-decimal precision (1 sat) — keeps BRL ↔ BTC consistent
-    onChange(btc.toFixed(8).replace(/0+$/, "").replace(/\.$/, ""));
-  };
+function DepositFlow({
+  user, onPayment, onConfirmed, renderStep,
+}: {
+  user: User;
+  onPayment: () => void;
+  onConfirmed: () => void;
+  renderStep: "deposit" | "payment";
+}) {
+  const { brl: btcRate, loading: priceLoading } = useBtcPrice();
+  const [brl, setBrl] = useState<string>("1000");
+  const [submitting, setSubmitting] = useState(false);
 
-  return (
-    <div className="space-y-5">
-      <SectionTitle
-        title="Defina seu aporte em BTC"
-        subtitle="O bônus de 30% é creditado em BTC imediatamente após a confirmação on-chain."
-      />
+  const brlNum = Math.max(0, Number(brl.replace(/\./g, "").replace(",", ".")) || 0);
+  const btcNum = btcRate > 0 ? brlNum / btcRate : 0;
+  const minBRL = 100;
+  const valid = brlNum >= minBRL && btcRate > 0;
 
-      <div className="rounded-[2rem] glass p-5 space-y-4">
-        <Field label="VALOR DO APORTE (BTC)">
-          <div className="relative">
-            <span className="absolute left-4 top-1/2 -translate-y-1/2 font-mono-tag text-lime">BTC</span>
-            <input
-              value={value}
-              onChange={(e) => onChange(e.target.value.replace(/[^0-9.]/g, ""))}
-              inputMode="decimal"
-              placeholder="0.01"
-              className="w-full rounded-xl bg-white/[0.04] border border-white/10 pl-16 pr-4 py-4 text-3xl font-semibold tracking-tight outline-none focus:border-lime focus:ring-2 focus:ring-lime/30 transition tabular-nums"
-            />
-          </div>
-        </Field>
-
-        <div className="grid grid-cols-4 gap-2">
-          {quickBTC.map((q) => (
-            <button
-              key={q}
-              onClick={() => onChange(String(q))}
-              className={`rounded-lg py-2 text-xs font-semibold border transition ${
-                num === q
-                  ? "bg-lime text-black border-lime"
-                  : "bg-white/[0.03] border-white/10 text-white/60 hover:text-white"
-              }`}
-            >
-              {q} BTC
-            </button>
-          ))}
-        </div>
-
-        <div className="grid grid-cols-4 gap-2">
-          {quickBRL.map((q) => (
-            <button
-              key={q}
-              onClick={() => setFromBRL(q)}
-              className="rounded-lg py-2 text-xs font-semibold border bg-white/[0.03] border-white/10 text-white/60 hover:text-white transition tabular-nums"
-            >
-              R$ {q.toLocaleString("pt-BR")}
-            </button>
-          ))}
-        </div>
-
-        {/* BTC is the hero; BRL is a small reference */}
-        <div className="rounded-xl bg-black/40 border border-white/10 p-4 space-y-1">
-          <div className="font-mono-tag text-white/50">VOCÊ VAI DEPOSITAR</div>
-          <div className="text-3xl font-semibold tabular-nums tracking-tight">{fmtBTC(num)}</div>
-          <div className="text-xs text-white/40 tabular-nums">≈ {fmtBRL(brlEquiv)} · 1 BTC ≈ {fmtBRL(BTC_RATE_BRL)}</div>
-        </div>
-
-        <div className="rounded-xl bg-lime/10 border border-lime/30 p-3 flex items-center justify-between">
-          <div>
-            <div className="font-mono-tag text-lime/80">BÔNUS APLICADO</div>
-            <div className="text-lg font-semibold text-lime tabular-nums">
-              +{(num * 0.3).toLocaleString("pt-BR", { minimumFractionDigits: 6, maximumFractionDigits: 8 })} BTC
+  if (renderStep === "deposit") {
+    const quickBRL = [500, 1000, 5000, 10000, 25000, 50000];
+    return (
+      <div className="space-y-5">
+        <SectionTitle
+          title="Defina o valor do aporte"
+          subtitle="Informe o valor em reais (BRL). Calculamos o equivalente em BTC com a cotação ao vivo da CoinGecko."
+        />
+        <div className="rounded-[2rem] glass p-5 space-y-4">
+          <div className="rounded-xl bg-black/40 border border-white/10 p-3 flex items-center justify-between">
+            <div>
+              <div className="font-mono-tag text-white/50">COTAÇÃO BTC/BRL</div>
+              <div className="text-sm font-semibold tabular-nums mt-0.5">
+                {priceLoading ? "Carregando…" : fmtBRL(btcRate)}
+              </div>
+            </div>
+            <div className="font-mono-tag text-lime flex items-center gap-1.5">
+              <span className="h-1.5 w-1.5 rounded-full bg-lime animate-pulse" /> AO VIVO
             </div>
           </div>
-          <div className="rounded-full bg-lime/20 px-3 py-1 text-xs font-bold text-lime">
-            +30% imediato
+
+          <Field label="VALOR DO APORTE (BRL)">
+            <div className="relative">
+              <span className="absolute left-4 top-1/2 -translate-y-1/2 font-mono-tag text-lime">R$</span>
+              <input
+                value={brl}
+                onChange={(e) => setBrl(e.target.value.replace(/[^0-9.,]/g, ""))}
+                inputMode="decimal"
+                placeholder="1000"
+                className="w-full rounded-xl bg-white/[0.04] border border-white/10 pl-12 pr-4 py-4 text-3xl font-semibold tabular-nums outline-none focus:border-lime focus:ring-2 focus:ring-lime/30 transition"
+              />
+            </div>
+          </Field>
+
+          <div className="grid grid-cols-3 sm:grid-cols-6 gap-2">
+            {quickBRL.map((q) => (
+              <button
+                key={q}
+                onClick={() => setBrl(String(q))}
+                className={`rounded-lg py-2 text-xs font-semibold border transition tabular-nums ${
+                  brlNum === q ? "bg-lime text-black border-lime" : "bg-white/[0.03] border-white/10 text-white/60 hover:text-white"
+                }`}
+              >
+                R$ {q.toLocaleString("pt-BR")}
+              </button>
+            ))}
           </div>
+
+          <div className="rounded-xl bg-black/40 border border-white/10 p-4 space-y-1">
+            <div className="font-mono-tag text-white/50">EQUIVALENTE EM BTC</div>
+            <div className="text-3xl font-semibold tabular-nums tracking-tight">{fmtBTC(btcNum)}</div>
+            <div className="text-xs text-white/40 tabular-nums">≈ {fmtBRL(brlNum)} · 1 BTC ≈ {fmtBRL(btcRate)}</div>
+          </div>
+
+          {!user.firstDepositDone && (
+            <div className="rounded-xl bg-lime/10 border border-lime/30 p-3 flex items-center justify-between">
+              <div>
+                <div className="font-mono-tag text-lime/80">BÔNUS DE BOAS-VINDAS</div>
+                <div className="text-sm font-semibold text-lime tabular-nums">
+                  +{(btcNum * 0.3).toLocaleString("pt-BR", { minimumFractionDigits: 6, maximumFractionDigits: 8 })} BTC após aprovação
+                </div>
+              </div>
+              <div className="rounded-full bg-lime/20 px-3 py-1 text-xs font-bold text-lime">+30%</div>
+            </div>
+          )}
+
+          {brlNum > 0 && brlNum < minBRL && (
+            <p className="text-xs text-warning">Aporte mínimo: {fmtBRL(minBRL)}</p>
+          )}
         </div>
 
-        {num > 0 && num < 0.0005 && (
-          <p className="text-xs text-warning">Aporte mínimo: 0.0005 BTC</p>
-        )}
-      </div>
+        <PrimaryButton onClick={onPayment} disabled={!valid}>
+          Gerar endereço de depósito <ArrowRight className="h-5 w-5" />
+        </PrimaryButton>
 
-      <PrimaryButton
-        onClick={() => { setLoading(true); setTimeout(() => onNext(), 1000); }}
-        disabled={!valid || loading}
-      >
-        {loading ? (
-          <><Loader2 className="h-5 w-5 animate-spin" /> Gerando endereço…</>
-        ) : (
-          <>Gerar endereço de depósito <ArrowRight className="h-5 w-5" /></>
-        )}
-      </PrimaryButton>
-    </div>
-  );
+        {/* keep value for payment step via sessionStorage */}
+        <HiddenPersist value={brl} />
+      </div>
+    );
+  }
+
+  // PAYMENT step — read value from sessionStorage if needed
+  const persisted = typeof window !== "undefined" ? window.sessionStorage.getItem("hexa_deposit_brl") : null;
+  const usedBRL = persisted ? Number(persisted) : brlNum;
+  const usedBTC = btcRate > 0 ? usedBRL / btcRate : 0;
+
+  const submit = () => {
+    setSubmitting(true);
+    setTimeout(() => {
+      createDeposit({ userId: user.id, amountBRL: usedBRL, amountBTC: usedBTC, btcRateBRL: btcRate });
+      window.sessionStorage.removeItem("hexa_deposit_brl");
+      setSubmitting(false);
+      onConfirmed();
+    }, 800);
+  };
+
+  return <PaymentScreen amountBRL={usedBRL} amountBTC={usedBTC} btcRate={btcRate} onSubmit={submit} submitting={submitting} />;
 }
 
-/* ---------- PAYMENT ---------- */
+function HiddenPersist({ value }: { value: string }) {
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      const num = Number(value.replace(/\./g, "").replace(",", ".")) || 0;
+      window.sessionStorage.setItem("hexa_deposit_brl", String(num));
+    }
+  }, [value]);
+  return null;
+}
 
-function Payment({ amountBTC, onNext }: { amountBTC: number; onNext: () => void }) {
-  const address = useMemo(() => {
-    const seed = Math.max(1, Math.round(amountBTC * 1e8));
-    const hex = (seed * 2654435761 >>> 0).toString(16).padStart(8, "0");
-    return `bc1q${hex}${hex.slice(0, 4)}${hex.slice(4)}xprq${hex.slice(0, 6)}`;
-  }, [amountBTC]);
-
-  const [copied, setCopied] = useState(false);
-  const copy = async () => {
+function PaymentScreen({
+  amountBRL, amountBTC, btcRate, onSubmit, submitting,
+}: {
+  amountBRL: number; amountBTC: number; btcRate: number; onSubmit: () => void; submitting: boolean;
+}) {
+  const [copied, setCopied] = useState<"addr" | "btc" | "email" | null>(null);
+  const copy = async (text: string, key: "addr" | "btc" | "email") => {
     try {
-      await navigator.clipboard.writeText(address);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 1500);
+      await navigator.clipboard.writeText(text);
+      setCopied(key);
+      setTimeout(() => setCopied(null), 1500);
     } catch {}
   };
+  const btcStr = amountBTC.toFixed(8);
 
   return (
     <div className="space-y-5">
       <SectionTitle
         title="Envie seu depósito em BTC"
-        subtitle={`Transfira exatamente ${fmtBTC(amountBTC)} para o endereço abaixo.`}
+        subtitle={`Envie exatamente ${fmtBTC(amountBTC)} para o endereço abaixo. Após o pagamento, encaminhe o comprovante para ${SUPPORT_EMAIL}.`}
       />
 
       <div className="rounded-[2rem] glass p-5 space-y-4">
-        <div className="rounded-xl bg-black/40 border border-white/10 p-4 space-y-1">
+        <div className="rounded-xl bg-black/40 border border-white/10 p-4 space-y-2">
           <div className="flex items-center justify-between">
-            <span className="font-mono-tag text-white/50">VALOR EXATO A DEPOSITAR</span>
-            <span className="font-mono-tag text-lime flex items-center gap-1.5">
-              <span className="h-1.5 w-1.5 rounded-full bg-lime animate-pulse" /> AGUARDANDO
-            </span>
+            <span className="font-mono-tag text-white/50">VALOR EM REAIS</span>
+            <span className="font-mono-tag text-white/40 tabular-nums">1 BTC ≈ {fmtBRL(btcRate)}</span>
           </div>
-          <div className="text-3xl font-semibold tabular-nums tracking-tight">{fmtBTC(amountBTC)}</div>
-          <div className="text-xs text-white/40">≈ {fmtBRL(amountBTC * BTC_RATE_BRL)}</div>
+          <div className="text-2xl font-semibold tabular-nums">{fmtBRL(amountBRL)}</div>
+          <div className="h-px bg-white/10 my-1" />
+          <div className="flex items-center justify-between">
+            <span className="font-mono-tag text-lime">VALOR EXATO A ENVIAR</span>
+            <button onClick={() => copy(btcStr, "btc")} className="font-mono-tag text-lime hover:underline flex items-center gap-1">
+              {copied === "btc" ? <><Check className="h-3 w-3" /> COPIADO</> : <><Copy className="h-3 w-3" /> COPIAR</>}
+            </button>
+          </div>
+          <div className="text-3xl font-semibold tabular-nums tracking-tight text-lime">{btcStr} BTC</div>
         </div>
 
         <div>
-          <div className="font-mono-tag text-white/50 mb-2">ENDEREÇO BITCOIN (REDE BTC)</div>
+          <div className="flex items-center justify-between mb-2">
+            <span className="font-mono-tag text-white/50">ENDEREÇO BITCOIN (REDE BTC)</span>
+            <button onClick={() => copy(WALLET_ADDRESS, "addr")} className="font-mono-tag text-lime hover:underline flex items-center gap-1">
+              {copied === "addr" ? <><Check className="h-3 w-3" /> COPIADO</> : <><Copy className="h-3 w-3" /> COPIAR</>}
+            </button>
+          </div>
           <div className="rounded-xl bg-black/50 border border-white/10 p-3 font-mono text-[12px] leading-relaxed break-all text-white/85 select-all">
-            {address}
+            {WALLET_ADDRESS}
           </div>
         </div>
 
-        <button
-          onClick={copy}
-          className="w-full flex items-center justify-center gap-2 rounded-xl bg-white/[0.04] border border-white/10 hover:border-lime/50 transition px-4 py-3 text-sm font-semibold"
-        >
-          {copied ? (
-            <><Check className="h-4 w-4 text-lime" /> <span className="text-lime">Endereço copiado</span></>
-          ) : (
-            <><Copy className="h-4 w-4" /> Copiar endereço</>
-          )}
-        </button>
-      </div>
+        <div className="rounded-xl bg-lime/10 border border-lime/30 p-4 text-sm text-white/90 space-y-2">
+          <div className="flex items-start gap-2">
+            <Mail className="h-4 w-4 text-lime mt-0.5 shrink-0" />
+            <div>
+              <div className="font-semibold text-lime">Envie o comprovante para:</div>
+              <div className="flex items-center gap-2 mt-1">
+                <a href={`mailto:${SUPPORT_EMAIL}`} className="font-mono text-white hover:text-lime transition">
+                  {SUPPORT_EMAIL}
+                </a>
+                <button onClick={() => copy(SUPPORT_EMAIL, "email")} className="text-white/50 hover:text-lime">
+                  {copied === "email" ? <Check className="h-3 w-3" /> : <Copy className="h-3 w-3" />}
+                </button>
+              </div>
+            </div>
+          </div>
+          <p className="text-xs text-white/60 pl-6">
+            Assim que finalizar o pagamento, envie o comprovante junto com seu e-mail de cadastro.
+            A liberação do saldo (com o bônus de 30%, se for o primeiro aporte) acontece após a aprovação manual.
+          </p>
+        </div>
 
-      <PrimaryButton onClick={onNext}>
-        Já enviei o depósito <ArrowRight className="h-5 w-5" />
-      </PrimaryButton>
-    </div>
-  );
-}
-
-/* ---------- CONFIRMED ---------- */
-
-function Confirmed({ amountBTC, onNext }: { amountBTC: number; onNext: () => void }) {
-  return (
-    <div className="space-y-5 text-center">
-      <div className="flex justify-center pt-2">
-        <div className="h-20 w-20 rounded-full bg-lime/20 flex items-center justify-center animate-pulse-gold">
-          <Check className="h-10 w-10 text-lime" />
+        <div className="rounded-xl bg-warning/10 border border-warning/30 p-3 text-xs text-white/80 flex items-start gap-2">
+          <AlertTriangle className="h-4 w-4 text-warning shrink-0 mt-0.5" />
+          <span>
+            Envie <b>exatamente</b> o valor em BTC indicado acima. Valores diferentes podem atrasar a confirmação.
+          </span>
         </div>
       </div>
 
-      <SectionTitle
-        title="Depósito confirmado"
-        subtitle="Seu aporte foi recebido. O bônus de 30% em BTC já está creditado e a estratégia está ativa."
-      />
-
-      <div className="rounded-[2rem] glass p-5 space-y-3 text-left">
-        <Row label="Aporte recebido" value={fmtBTC(amountBTC)} />
-        <Row label="Bônus de boas-vindas" value={`+${fmtBTC(amountBTC * 0.3)}`} success />
-        <div className="h-px bg-white/10" />
-        <Row label="Saldo creditado" value={fmtBTC(amountBTC * 2)} highlight />
-        <div className="text-right text-xs text-white/40 tabular-nums">≈ {fmtBRL(amountBTC * 2 * BTC_RATE_BRL)}</div>
-      </div>
-
-      <PrimaryButton onClick={onNext}>
-        Acessar meu painel <ArrowRight className="h-5 w-5" />
+      <PrimaryButton onClick={onSubmit} disabled={submitting}>
+        {submitting ? (
+          <><Loader2 className="h-5 w-5 animate-spin" /> Registrando solicitação…</>
+        ) : (
+          <>Já realizei o pagamento <ArrowRight className="h-5 w-5" /></>
+        )}
       </PrimaryButton>
     </div>
   );
@@ -856,21 +902,14 @@ const TABS: { id: DashTab; label: string; icon: React.ReactNode }[] = [
   { id: "deposit", label: "Depositar", icon: <ArrowDownToLine className="h-4 w-4" /> },
   { id: "withdraw", label: "Sacar", icon: <ArrowUpFromLine className="h-4 w-4" /> },
   { id: "market", label: "Mercado", icon: <Store className="h-4 w-4" /> },
-  { id: "profile", label: "Perfil", icon: <User className="h-4 w-4" /> },
+  { id: "profile", label: "Perfil", icon: <UserIcon className="h-4 w-4" /> },
 ];
 
-function Dashboard({ balanceBTC, depositBTC }: { balanceBTC: number; depositBTC: number }) {
+function Dashboard({ user, onLogout }: { user: User; onLogout: () => void }) {
   const [tab, setTab] = useState<DashTab>("overview");
-  const [currentBalance, setCurrentBalance] = useState(balanceBTC);
-
-  const onWithdrawn = (amount: number) => {
-    setCurrentBalance((b) => Math.max(0, b - amount));
-    setTab("overview");
-  };
 
   return (
     <div className="md:grid md:grid-cols-[220px_1fr] md:gap-6">
-      {/* Desktop sidebar */}
       <aside className="hidden md:block rounded-[2rem] glass p-3 h-fit">
         <div className="space-y-1">
           {TABS.map((t) => (
@@ -879,22 +918,20 @@ function Dashboard({ balanceBTC, depositBTC }: { balanceBTC: number; depositBTC:
             </SideItem>
           ))}
           <div className="h-px bg-white/10 my-2" />
-          <SideItem icon={<LogOut className="h-4 w-4" />} onClick={() => window.location.reload()}>Sair</SideItem>
+          <SideItem icon={<LogOut className="h-4 w-4" />} onClick={onLogout}>Sair</SideItem>
         </div>
       </aside>
 
-      {/* Main */}
       <section className="space-y-4 sm:space-y-5 pb-24 md:pb-0">
-        {tab === "overview" && <Overview balanceBTC={currentBalance} depositBTC={depositBTC} onWithdraw={() => setTab("withdraw")} />}
-        {tab === "deposit" && <DepositTab />}
-        {tab === "withdraw" && <WithdrawTab balanceBTC={currentBalance} onDone={onWithdrawn} />}
+        {tab === "overview" && <Overview user={user} onDeposit={() => setTab("deposit")} onWithdraw={() => setTab("withdraw")} />}
+        {tab === "deposit" && <DepositTab user={user} onDone={() => setTab("overview")} />}
+        {tab === "withdraw" && <WithdrawTab user={user} onDone={() => setTab("overview")} />}
         {tab === "market" && <MarketTab />}
-        {tab === "profile" && <ProfileTab />}
+        {tab === "profile" && <ProfileTab user={user} />}
       </section>
 
-      {/* Mobile bottom nav */}
       <nav className="md:hidden fixed bottom-3 left-3 right-3 z-40 rounded-2xl glass px-2 py-2 flex items-center justify-around shadow-2xl">
-        {TABS.slice(0, 5).map((t) => (
+        {TABS.map((t) => (
           <button
             key={t.id}
             onClick={() => setTab(t.id)}
@@ -911,9 +948,7 @@ function Dashboard({ balanceBTC, depositBTC }: { balanceBTC: number; depositBTC:
   );
 }
 
-function SideItem({
-  icon, children, active, onClick,
-}: { icon: React.ReactNode; children: React.ReactNode; active?: boolean; onClick: () => void }) {
+function SideItem({ icon, children, active, onClick }: { icon: React.ReactNode; children: React.ReactNode; active?: boolean; onClick: () => void }) {
   return (
     <button
       onClick={onClick}
@@ -927,13 +962,17 @@ function SideItem({
   );
 }
 
-function Overview({
-  balanceBTC, depositBTC, onWithdraw,
-}: { balanceBTC: number; depositBTC: number; onWithdraw: () => void }) {
-  const brl = balanceBTC * BTC_RATE_BRL;
+function Overview({ user, onDeposit, onWithdraw }: { user: User; onDeposit: () => void; onWithdraw: () => void }) {
+  const db = useStore();
+  const { brl: btcRate } = useBtcPrice();
+  const balanceBTC = user.balanceBTC;
+  const balanceBRL = balanceBTC * btcRate;
+
+  const myPendingDeposits = db.deposits.filter((d) => d.userId === user.id && d.status === "pending");
+  const myPendingWithdrawals = db.withdrawals.filter((w) => w.userId === user.id && w.status === "pending");
+
   return (
     <>
-      {/* Hero card — BTC is the headline, BRL is a small subtitle */}
       <div className="relative overflow-hidden rounded-[2rem] glass p-6">
         <div className="absolute -top-6 -right-6 opacity-40"><HexaCoin size={140} /></div>
         <div className="relative space-y-3">
@@ -945,37 +984,66 @@ function Overview({
               {balanceBTC.toLocaleString("pt-BR", { minimumFractionDigits: 6, maximumFractionDigits: 8 })}
             </div>
             <div className="font-mono-tag text-lime mt-1.5">BTC</div>
-            <div className="text-xs text-white/40 mt-2 tabular-nums">≈ {fmtBRL(brl)}</div>
+            <div className="text-xs text-white/40 mt-2 tabular-nums">≈ {fmtBRL(balanceBRL)} · 1 BTC ≈ {fmtBRL(btcRate)}</div>
           </div>
           <div className="flex flex-wrap gap-2 pt-1">
-            <div className="inline-flex items-center gap-1.5 rounded-full bg-lime/15 border border-lime/30 px-3 py-1 text-xs font-semibold text-lime">
-              <TrendingUp className="h-3 w-3" />
-              Bônus de 30% aplicado
-            </div>
-            <div className="inline-flex items-center gap-1.5 rounded-full bg-white/[0.04] border border-white/10 px-3 py-1 text-xs font-semibold text-white/70">
+            <span className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-semibold ${
+              user.kycStatus === "approved" ? "bg-lime/15 border border-lime/30 text-lime" : "bg-warning/15 border border-warning/30 text-warning"
+            }`}>
+              <ShieldCheck className="h-3 w-3" /> KYC: {user.kycStatus.toUpperCase()}
+            </span>
+            <span className="inline-flex items-center gap-1.5 rounded-full bg-white/[0.04] border border-white/10 px-3 py-1 text-xs font-semibold text-white/70">
               <Activity className="h-3 w-3 text-lime" /> Estratégia ativa
-            </div>
+            </span>
           </div>
-          <button
-            onClick={onWithdraw}
-            className="mt-3 w-full sm:w-auto inline-flex items-center justify-center gap-2 rounded-full bg-lime text-black font-bold px-6 py-3 text-sm hover:scale-[1.01] transition"
-            style={{ boxShadow: "0 0 24px oklch(0.83 0.17 84 / 30%)" }}
-          >
-            Solicitar saque <ArrowRight className="h-4 w-4" />
-          </button>
+          <div className="flex flex-wrap gap-2 pt-2">
+            <button onClick={onDeposit} className="inline-flex items-center gap-2 rounded-full bg-lime text-black font-bold px-5 py-3 text-sm hover:scale-[1.01] transition">
+              <ArrowDownToLine className="h-4 w-4" /> Depositar
+            </button>
+            <button onClick={onWithdraw} className="inline-flex items-center gap-2 rounded-full border border-white/15 px-5 py-3 text-sm font-semibold hover:border-lime/50 transition">
+              <ArrowUpFromLine className="h-4 w-4" /> Sacar
+            </button>
+          </div>
         </div>
       </div>
 
-      {/* Yield chart card */}
+      {(myPendingDeposits.length > 0 || myPendingWithdrawals.length > 0) && (
+        <div className="rounded-[2rem] glass p-5 space-y-3">
+          <div className="font-mono-tag text-white/50">SOLICITAÇÕES EM ANÁLISE</div>
+          {myPendingDeposits.map((d) => (
+            <div key={d.id} className="rounded-xl bg-warning/5 border border-warning/30 p-3 flex items-center justify-between">
+              <div className="text-sm">
+                <div className="font-semibold flex items-center gap-2">
+                  <ArrowDownToLine className="h-4 w-4 text-warning" /> Depósito · {fmtBTC(d.amountBTC)}
+                </div>
+                <div className="text-xs text-white/50 tabular-nums">≈ {fmtBRL(d.amountBRL)} · {new Date(d.createdAt).toLocaleString("pt-BR")}</div>
+              </div>
+              <span className="rounded-full bg-warning/15 text-warning px-2 py-0.5 text-[11px] font-bold">AGUARDANDO</span>
+            </div>
+          ))}
+          {myPendingWithdrawals.map((w) => (
+            <div key={w.id} className="rounded-xl bg-warning/5 border border-warning/30 p-3 flex items-center justify-between">
+              <div className="text-sm">
+                <div className="font-semibold flex items-center gap-2">
+                  <ArrowUpFromLine className="h-4 w-4 text-warning" /> Saque · {fmtBTC(w.amountBTC)}
+                </div>
+                <div className="text-xs text-white/50 tabular-nums">≈ {fmtBRL(w.amountBRL)} · {new Date(w.createdAt).toLocaleString("pt-BR")}</div>
+              </div>
+              <span className="rounded-full bg-warning/15 text-warning px-2 py-0.5 text-[11px] font-bold">AGUARDANDO</span>
+            </div>
+          ))}
+        </div>
+      )}
+
       <div className="rounded-[2rem] glass p-5 sm:p-6 space-y-4">
         <div className="flex items-start justify-between gap-3">
           <div>
             <div className="font-mono-tag text-white/50">RENDIMENTO ACUMULADO</div>
             <div className="text-2xl sm:text-3xl font-semibold tracking-tight mt-1 tabular-nums">
-              +{fmtBTC(depositBTC * 0.184)}
+              +{fmtBTC(user.totalDepositBTC * 0.184)}
             </div>
             <div className="text-xs text-white/40 mt-0.5 tabular-nums">
-              ≈ {fmtBRL(depositBTC * 0.184 * BTC_RATE_BRL)} · APY 18,4%
+              ≈ {fmtBRL(user.totalDepositBTC * 0.184 * btcRate)} · APY 18,4%
             </div>
           </div>
           <div className="font-mono-tag text-lime flex items-center gap-1.5 shrink-0">
@@ -983,99 +1051,129 @@ function Overview({
           </div>
         </div>
         <YieldChart height={150} />
-        <div className="grid grid-cols-3 gap-2">
-          <MiniStat label="Hoje" value="+0,051%" accent compact />
-          <MiniStat label="7 dias" value="+0,38%" compact />
-          <MiniStat label="30 dias" value="+1,62%" compact />
-        </div>
-      </div>
-
-      {/* Position breakdown — BTC values lead, BRL subdued */}
-      <div className="rounded-[2rem] glass p-5 sm:p-6 space-y-4">
-        <div>
-          <div className="font-mono-tag text-white/50">RESUMO DA POSIÇÃO</div>
-          <h3 className="text-xl font-semibold tracking-tight mt-1">Sua estratégia</h3>
-        </div>
-        <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-          <MiniStat label="Aporte" value={fmtBTC(depositBTC)} />
-          <MiniStat label="Bônus creditado" value={`+${fmtBTC(depositBTC * 0.3)}`} accent />
-          <MiniStat label="Estratégia" value="Delta-neutra" />
-        </div>
       </div>
     </>
   );
 }
 
-function MiniStat({ label, value, accent, compact }: { label: string; value: string; accent?: boolean; compact?: boolean }) {
+/* ---------- DEPOSIT TAB (inside dashboard) ---------- */
+
+function DepositTab({ user, onDone }: { user: User; onDone: () => void }) {
+  const [phase, setPhase] = useState<"amount" | "payment">("amount");
   return (
-    <div className={`rounded-2xl bg-white/[0.03] border border-white/10 ${compact ? "p-3" : "p-4"}`}>
-      <div className="font-mono-tag text-white/50">{label}</div>
-      <div className={`mt-1 font-semibold tabular-nums ${compact ? "text-sm" : "text-lg"} ${accent ? "text-lime" : ""}`}>{value}</div>
-    </div>
+    <DepositFlow
+      user={user}
+      onPayment={() => setPhase("payment")}
+      onConfirmed={onDone}
+      renderStep={phase === "amount" ? "deposit" : "payment"}
+    />
   );
 }
 
-function DepositTab() {
-  const [phase, setPhase] = useState<"amount" | "address">("amount");
-  const [value, setValue] = useState("0.01");
-  const [loading, setLoading] = useState(false);
-  const num = Number(value) || 0;
+/* ---------- WITHDRAW TAB ---------- */
 
-  if (phase === "amount") {
+function WithdrawTab({ user, onDone }: { user: User; onDone: () => void }) {
+  const { brl: btcRate } = useBtcPrice();
+  const [val, setVal] = useState<string>("");
+  const [wallet, setWallet] = useState<string>("");
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [done, setDone] = useState(false);
+
+  const num = Math.max(0, Number(val) || 0);
+  const valid = num > 0 && num <= user.balanceBTC && wallet.trim().length >= 20;
+
+  const submit = () => {
+    setError(null);
+    setSubmitting(true);
+    setTimeout(() => {
+      const r = createWithdraw({ userId: user.id, amountBTC: num, amountBRL: num * btcRate, destinationWallet: wallet.trim() });
+      setSubmitting(false);
+      if ("error" in r) return setError(r.error);
+      setDone(true);
+      setTimeout(onDone, 1800);
+    }, 700);
+  };
+
+  if (done) {
     return (
-      <Deposit
-        value={value}
-        onChange={setValue}
-        onNext={() => {
-          setLoading(true);
-          setTimeout(() => { setLoading(false); setPhase("address"); }, 700);
-        }}
-      />
+      <div className="rounded-[2rem] glass p-8 text-center space-y-3">
+        <div className="mx-auto h-16 w-16 rounded-full bg-warning/15 flex items-center justify-center">
+          <Clock className="h-8 w-8 text-warning" />
+        </div>
+        <div className="text-xl font-semibold">Solicitação enviada</div>
+        <div className="text-sm text-white/60">Seu saque foi encaminhado para aprovação manual pela equipe Hexa Corp.</div>
+      </div>
     );
   }
 
   return (
-    <div className="space-y-4">
-      <button
-        onClick={() => setPhase("amount")}
-        className="font-mono-tag text-white/50 hover:text-lime transition"
-      >
-        ← ALTERAR VALOR
-      </button>
-      <Payment amountBTC={num} onNext={() => setPhase("amount")} />
+    <div className="space-y-5">
+      <div className="rounded-[2rem] glass p-5 sm:p-6 space-y-4">
+        <SectionTitle title="Solicitação de saque" subtitle="Informe o valor em BTC e a carteira de destino. Saques passam por aprovação manual." />
+
+        <Field label="VALOR DO SAQUE (BTC)">
+          <div className="relative">
+            <span className="absolute left-4 top-1/2 -translate-y-1/2 font-mono-tag text-lime">BTC</span>
+            <input
+              value={val}
+              onChange={(e) => setVal(e.target.value.replace(/[^0-9.]/g, ""))}
+              inputMode="decimal"
+              placeholder="0.00000000"
+              className="w-full rounded-xl bg-white/[0.04] border border-white/10 pl-16 pr-4 py-4 text-2xl font-semibold tabular-nums outline-none focus:border-lime focus:ring-2 focus:ring-lime/30 transition"
+            />
+          </div>
+        </Field>
+
+        <div className="flex items-center justify-between text-xs">
+          <button onClick={() => setVal(user.balanceBTC.toFixed(8))} className="font-semibold text-lime hover:underline">
+            Sacar tudo · {fmtBTC(user.balanceBTC)}
+          </button>
+          <span className="text-white/40 tabular-nums">≈ {fmtBRL(num * btcRate)}</span>
+        </div>
+
+        <Field label="CARTEIRA DE DESTINO (BTC)">
+          <input
+            value={wallet}
+            onChange={(e) => setWallet(e.target.value.trim())}
+            placeholder="bc1q..."
+            className={inputCls + " font-mono text-xs"}
+          />
+        </Field>
+
+        {error && <div className="rounded-xl bg-red-500/10 border border-red-500/30 p-3 text-xs text-red-300">{error}</div>}
+
+        <div className="rounded-xl bg-warning/10 border border-warning/30 p-3 text-xs text-white/80 flex items-start gap-2">
+          <AlertTriangle className="h-4 w-4 text-warning shrink-0 mt-0.5" />
+          <span>O saldo é reservado no momento da solicitação. Saques aprovados são enviados à carteira informada.</span>
+        </div>
+      </div>
+
+      <PrimaryButton onClick={submit} disabled={!valid || submitting}>
+        {submitting ? <><Loader2 className="h-5 w-5 animate-spin" /> Enviando…</> : <>Solicitar saque <ArrowRight className="h-5 w-5" /></>}
+      </PrimaryButton>
     </div>
   );
 }
 
-/* ---------- MARKET ---------- */
-
-const MARKET_ASSETS = [
-  { sym: "BTC", name: "Bitcoin", price: 350_000, change: 2.34 },
-  { sym: "ETH", name: "Ethereum", price: 18_420, change: 1.12 },
-  { sym: "SOL", name: "Solana", price: 940, change: -0.85 },
-  { sym: "BNB", name: "BNB", price: 3_120, change: 0.42 },
-  { sym: "XRP", name: "XRP", price: 3.18, change: 3.91 },
-  { sym: "ADA", name: "Cardano", price: 2.47, change: -1.20 },
-  { sym: "AVAX", name: "Avalanche", price: 215, change: 0.66 },
-  { sym: "DOGE", name: "Dogecoin", price: 0.92, change: -2.10 },
-  { sym: "LINK", name: "Chainlink", price: 142, change: 1.78 },
-  { sym: "MATIC", name: "Polygon", price: 4.85, change: -0.34 },
-];
+/* ---------- MARKET (CoinGecko live) ---------- */
 
 function MarketTab() {
+  const { coins, loading } = useMarket();
   const [query, setQuery] = useState("");
-  const filtered = MARKET_ASSETS.filter(a =>
-    a.sym.toLowerCase().includes(query.toLowerCase()) ||
-    a.name.toLowerCase().includes(query.toLowerCase())
+  const filtered = coins.filter(
+    (a) =>
+      a.symbol.toLowerCase().includes(query.toLowerCase()) ||
+      a.name.toLowerCase().includes(query.toLowerCase()),
   );
   return (
     <div className="rounded-[2rem] glass p-5 sm:p-6 space-y-4">
-      <SectionTitle title="Mercado" subtitle="Cotações em tempo real das principais criptomoedas." />
+      <SectionTitle title="Mercado" subtitle="Cotações em tempo real via CoinGecko." />
       <input
         value={query}
         onChange={(e) => setQuery(e.target.value)}
         placeholder="Buscar ativo…"
-        className="w-full rounded-xl bg-white/[0.04] border border-white/10 px-4 py-3 text-sm outline-none focus:border-lime focus:ring-2 focus:ring-lime/30 transition placeholder:text-white/30"
+        className={inputCls}
       />
       <div className="divide-y divide-white/10">
         <div className="grid grid-cols-[1fr_auto_auto] gap-3 py-2 font-mono-tag text-white/40 text-[10px]">
@@ -1083,19 +1181,23 @@ function MarketTab() {
           <span className="text-right">PREÇO</span>
           <span className="text-right w-16">24H</span>
         </div>
-        {filtered.map((a) => (
-          <div key={a.sym} className="grid grid-cols-[1fr_auto_auto] gap-3 py-3 items-center">
-            <div className="min-w-0">
-              <div className="font-semibold text-sm">{a.sym}</div>
-              <div className="font-mono-tag text-white/40">{a.name}</div>
+        {loading && <div className="py-6 text-center text-sm text-white/40">Carregando mercado…</div>}
+        {!loading && filtered.map((a) => (
+          <div key={a.id} className="grid grid-cols-[1fr_auto_auto] gap-3 py-3 items-center">
+            <div className="min-w-0 flex items-center gap-3">
+              {a.image && <img src={a.image} alt="" className="h-7 w-7 rounded-full" />}
+              <div>
+                <div className="font-semibold text-sm uppercase">{a.symbol}</div>
+                <div className="font-mono-tag text-white/40">{a.name}</div>
+              </div>
             </div>
-            <div className="text-right text-sm font-semibold tabular-nums">{fmtBRL(a.price)}</div>
-            <div className={`text-right text-xs font-semibold tabular-nums w-16 ${a.change >= 0 ? "text-lime" : "text-warning"}`}>
-              {a.change >= 0 ? "+" : ""}{a.change.toFixed(2)}%
+            <div className="text-right text-sm font-semibold tabular-nums">{fmtBRL(a.current_price)}</div>
+            <div className={`text-right text-xs font-semibold tabular-nums w-16 ${(a.price_change_percentage_24h ?? 0) >= 0 ? "text-lime" : "text-warning"}`}>
+              {(a.price_change_percentage_24h ?? 0) >= 0 ? "+" : ""}{(a.price_change_percentage_24h ?? 0).toFixed(2)}%
             </div>
           </div>
         ))}
-        {filtered.length === 0 && (
+        {!loading && filtered.length === 0 && (
           <div className="py-6 text-center text-sm text-white/40">Nenhum ativo encontrado</div>
         )}
       </div>
@@ -1105,208 +1207,57 @@ function MarketTab() {
 
 /* ---------- PROFILE ---------- */
 
-function ProfileTab() {
-  const [name, setName] = useState("Cliente Hexa");
-  const [email, setEmail] = useState("voce@email.com");
-  const [phone, setPhone] = useState("");
-  const [notifications, setNotifications] = useState(true);
-  const [twoFA, setTwoFA] = useState(true);
-  const [saved, setSaved] = useState(false);
-
-  const save = () => {
-    setSaved(true);
-    setTimeout(() => setSaved(false), 1500);
-  };
-
+function ProfileTab({ user }: { user: User }) {
   return (
     <div className="space-y-4">
       <div className="rounded-[2rem] glass p-5 sm:p-6 space-y-4">
-        <SectionTitle title="Perfil" subtitle="Personalize suas informações de conta e preferências." />
+        <SectionTitle title="Perfil" subtitle="Suas informações de identificação." />
 
         <div className="flex items-center gap-4">
           <div className="h-16 w-16 rounded-full bg-lime/15 border border-lime/30 flex items-center justify-center text-lime text-xl font-bold">
-            {name.charAt(0).toUpperCase()}
+            {user.name.charAt(0).toUpperCase()}
           </div>
           <div className="min-w-0">
-            <div className="font-semibold truncate">{name || "Sem nome"}</div>
-            <div className="font-mono-tag text-white/40 truncate">{email}</div>
+            <div className="font-semibold truncate">{user.name}</div>
+            <div className="font-mono-tag text-white/40 truncate">{user.email}</div>
           </div>
+          <span className={`ml-auto rounded-full px-3 py-1 text-xs font-semibold ${
+            user.kycStatus === "approved" ? "bg-lime/15 text-lime" : "bg-warning/15 text-warning"
+          }`}>
+            {user.kycStatus.toUpperCase()}
+          </span>
         </div>
 
-        <Field label="NOME">
-          <input
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            className="w-full rounded-xl bg-white/[0.04] border border-white/10 px-4 py-3 text-sm outline-none focus:border-lime focus:ring-2 focus:ring-lime/30 transition"
-          />
-        </Field>
-
-        <Field label="E-MAIL">
-          <input
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-            type="email"
-            className="w-full rounded-xl bg-white/[0.04] border border-white/10 px-4 py-3 text-sm outline-none focus:border-lime focus:ring-2 focus:ring-lime/30 transition"
-          />
-        </Field>
-
-        <Field label="TELEFONE">
-          <input
-            value={phone}
-            onChange={(e) => setPhone(e.target.value)}
-            placeholder="(11) 99999-0000"
-            className="w-full rounded-xl bg-white/[0.04] border border-white/10 px-4 py-3 text-sm outline-none focus:border-lime focus:ring-2 focus:ring-lime/30 transition placeholder:text-white/30"
-          />
-        </Field>
-      </div>
-
-      <div className="rounded-[2rem] glass p-5 sm:p-6 space-y-3">
-        <div className="font-mono-tag text-white/50">PREFERÊNCIAS</div>
-        <ToggleRow
-          label="Notificações por e-mail"
-          desc="Receba alertas sobre funding capturado e movimentações."
-          value={notifications}
-          onChange={setNotifications}
-        />
-        <ToggleRow
-          label="Autenticação em dois fatores"
-          desc="Camada extra de segurança no login."
-          value={twoFA}
-          onChange={setTwoFA}
-        />
-      </div>
-
-      <PrimaryButton onClick={save}>
-        {saved ? <><Check className="h-5 w-5" /> Salvo</> : <>Salvar alterações <ArrowRight className="h-5 w-5" /></>}
-      </PrimaryButton>
-    </div>
-  );
-}
-
-function ToggleRow({
-  label, desc, value, onChange,
-}: { label: string; desc: string; value: boolean; onChange: (v: boolean) => void }) {
-  return (
-    <button
-      onClick={() => onChange(!value)}
-      className="w-full flex items-center justify-between gap-3 rounded-xl bg-white/[0.03] border border-white/10 p-3 text-left hover:border-lime/40 transition"
-    >
-      <div className="min-w-0">
-        <div className="text-sm font-semibold">{label}</div>
-        <div className="text-xs text-white/50">{desc}</div>
-      </div>
-      <span className={`h-6 w-11 rounded-full p-0.5 transition shrink-0 ${value ? "bg-lime" : "bg-white/15"}`}>
-        <span className={`block h-5 w-5 rounded-full bg-black transition ${value ? "translate-x-5" : ""}`} />
-      </span>
-    </button>
-  );
-}
-
-/* ---------- WITHDRAW with 10% margin ---------- */
-
-type WithdrawPhase = "form" | "margin" | "done";
-
-function WithdrawTab({ balanceBTC, onDone }: { balanceBTC: number; onDone: (amount: number) => void }) {
-  const [phase, setPhase] = useState<WithdrawPhase>("form");
-  const [val, setVal] = useState<string>((balanceBTC / 2).toFixed(6));
-  const requested = Math.max(0, Number(val) || 0);
-  const margin = +(requested * 0.1).toFixed(8);
-
-  return (
-    <div className="space-y-5">
-      {phase === "form" && (
-        <>
-          <div className="rounded-[2rem] glass p-5 sm:p-6 space-y-4">
-            <SectionTitle
-              title="Solicitação de saque"
-              subtitle="Após 24h da confirmação, o saque é processado para a sua carteira."
-            />
-            <Field label="VALOR DO SAQUE (BTC)">
-              <div className="relative">
-                <span className="absolute left-4 top-1/2 -translate-y-1/2 font-mono-tag text-lime">BTC</span>
-                <input
-                  value={val}
-                  onChange={(e) => setVal(e.target.value.replace(/[^0-9.]/g, ""))}
-                  inputMode="decimal"
-                  className="w-full rounded-xl bg-white/[0.04] border border-white/10 pl-16 pr-4 py-4 text-2xl font-semibold tabular-nums outline-none focus:border-lime focus:ring-2 focus:ring-lime/30 transition"
-                />
-              </div>
-            </Field>
-            <div className="flex items-center justify-between text-xs">
-              <button onClick={() => setVal(balanceBTC.toFixed(8))} className="font-semibold text-lime hover:underline">
-                Sacar tudo · {fmtBTC(balanceBTC)}
-              </button>
-              <span className="text-white/40 tabular-nums">≈ {fmtBRL(requested * BTC_RATE_BRL)}</span>
-            </div>
-            <div className="rounded-xl bg-warning/10 border border-warning/30 p-3 text-xs text-white/80 flex items-start gap-2">
-              <AlertTriangle className="h-4 w-4 text-warning shrink-0 mt-0.5" />
-              <span>
-                Saques exigem <b>margem de segurança de 10%</b> em BTC sobre o valor solicitado.
-                Para esse saque: <b className="text-warning">{fmtBTC(margin)}</b>. Reembolsada
-                junto ao saque.
-              </span>
-            </div>
-          </div>
-
-          <PrimaryButton
-            onClick={() => setPhase("margin")}
-            disabled={requested <= 0 || requested > balanceBTC}
-          >
-            Continuar para margem <ArrowRight className="h-5 w-5" />
-          </PrimaryButton>
-        </>
-      )}
-
-      {phase === "margin" && (
-        <>
-          <div className="rounded-[2rem] glass p-5 sm:p-6 space-y-4">
-            <SectionTitle
-              title="Margem de segurança"
-              subtitle={`Envie ${fmtBTC(margin)} (10% do saque solicitado) para liberar o processamento.`}
-            />
-            <div className="rounded-xl bg-black/40 border border-white/10 p-4 space-y-1">
-              <div className="font-mono-tag text-white/50">VALOR DA MARGEM</div>
-              <div className="text-2xl font-semibold tabular-nums">{fmtBTC(margin)}</div>
-              <div className="text-xs text-white/40">≈ {fmtBRL(margin * BTC_RATE_BRL)}</div>
-            </div>
-            <div>
-              <div className="font-mono-tag text-white/50 mb-2">ENDEREÇO DA MARGEM (REDE BTC)</div>
-              <div className="rounded-xl bg-black/50 border border-white/10 p-3 font-mono text-[12px] break-all text-white/85 select-all">
-                bc1qmargin9x2c4a8saque5address7btc1secure3
-              </div>
-            </div>
-          </div>
-
-          <PrimaryButton onClick={() => { setPhase("done"); setTimeout(() => onDone(requested), 1400); }}>
-            Confirmar pagamento da margem <ArrowRight className="h-5 w-5" />
-          </PrimaryButton>
-        </>
-      )}
-
-      {phase === "done" && (
-        <div className="rounded-[2rem] glass p-8 text-center space-y-3">
-          <div className="mx-auto h-16 w-16 rounded-full bg-lime/20 flex items-center justify-center animate-pulse-gold">
-            <Check className="h-8 w-8 text-lime" />
-          </div>
-          <div className="text-xl font-semibold">Saque liberado</div>
-          <div className="text-sm text-white/60">Processando o envio de {fmtBTC(requested)} para a sua carteira.</div>
+        <div className="grid grid-cols-2 gap-3 text-sm">
+          <Row label="CPF" value={user.cpf ?? "—"} />
+          <Row label="Nascimento" value={user.birthDate ?? "—"} />
+          <Row label="Telefone" value={user.phone ?? "—"} />
+          <Row label="CEP" value={user.zip ?? "—"} />
+          <Row label="Cidade/UF" value={`${user.city ?? "—"}${user.state ? " / " + user.state : ""}`} />
+          <Row label="Endereço" value={user.address ?? "—"} />
         </div>
-      )}
+      </div>
+
+      <div className="rounded-[2rem] glass p-5 space-y-2 text-sm">
+        <div className="font-mono-tag text-white/50">SUPORTE</div>
+        <div className="text-white/80">
+          Dúvidas ou comprovantes:{" "}
+          <a href={`mailto:${SUPPORT_EMAIL}`} className="text-lime hover:underline font-mono">
+            {SUPPORT_EMAIL}
+          </a>
+        </div>
+      </div>
     </div>
   );
 }
 
 /* ---------- PRIMITIVES ---------- */
 
-function Row({
-  label, value, highlight, success, mono,
-}: { label: string; value: string; highlight?: boolean; success?: boolean; mono?: boolean }) {
+function Row({ label, value, highlight }: { label: string; value: string; highlight?: boolean }) {
   return (
-    <div className="flex items-center justify-between text-sm">
+    <div className="flex items-center justify-between text-sm gap-3">
       <span className="text-white/60">{label}</span>
-      <span className={`${highlight ? "font-bold text-lime text-base" : success ? "font-bold text-lime" : "font-semibold"} ${mono ? "font-mono text-xs" : "tabular-nums"}`}>
-        {value}
-      </span>
+      <span className={`${highlight ? "font-bold text-lime" : "font-semibold"} tabular-nums truncate text-right`}>{value}</span>
     </div>
   );
 }
@@ -1320,9 +1271,7 @@ function SectionTitle({ title, subtitle }: { title: string; subtitle?: string })
   );
 }
 
-function PrimaryButton({
-  children, onClick, disabled,
-}: { children: React.ReactNode; onClick: () => void; disabled?: boolean }) {
+function PrimaryButton({ children, onClick, disabled }: { children: React.ReactNode; onClick: () => void; disabled?: boolean }) {
   return (
     <button
       onClick={onClick}
@@ -1333,4 +1282,26 @@ function PrimaryButton({
       {children}
     </button>
   );
+}
+
+/* ---------- INPUT MASKS ---------- */
+
+function maskCPF(v: string) {
+  return v.replace(/\D/g, "").slice(0, 11)
+    .replace(/(\d{3})(\d)/, "$1.$2")
+    .replace(/(\d{3})(\d)/, "$1.$2")
+    .replace(/(\d{3})(\d{1,2})$/, "$1-$2");
+}
+function maskDate(v: string) {
+  return v.replace(/\D/g, "").slice(0, 8)
+    .replace(/(\d{2})(\d)/, "$1/$2")
+    .replace(/(\d{2})(\d)/, "$1/$2");
+}
+function maskPhone(v: string) {
+  const d = v.replace(/\D/g, "").slice(0, 11);
+  if (d.length <= 10) return d.replace(/(\d{2})(\d{4})(\d{0,4})/, "($1) $2-$3").trim();
+  return d.replace(/(\d{2})(\d{5})(\d{0,4})/, "($1) $2-$3").trim();
+}
+function maskCep(v: string) {
+  return v.replace(/\D/g, "").slice(0, 8).replace(/(\d{5})(\d)/, "$1-$2");
 }
