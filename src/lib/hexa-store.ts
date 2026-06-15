@@ -268,7 +268,7 @@ export function setWithdrawStatus(withdrawId: string, status: RequestStatus) {
 
 /* ---------- BTC Price (CoinGecko) ---------- */
 
-export function useBtcPrice(refreshMs = 30_000) {
+export function useBtcPrice(refreshMs = 10_000) {
   const [data, setData] = useState<{ brl: number; usd: number } | null>(null);
   const [loading, setLoading] = useState(true);
 
@@ -308,7 +308,7 @@ export type MarketCoin = {
   price_change_percentage_24h: number;
 };
 
-export function useMarket(refreshMs = 60_000) {
+export function useMarket(refreshMs = 15_000) {
   const [coins, setCoins] = useState<MarketCoin[]>([]);
   const [loading, setLoading] = useState(true);
 
