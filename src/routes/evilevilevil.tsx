@@ -56,16 +56,15 @@ function AdminPage() {
             value={pwd}
             onChange={(e) => setPwd(e.target.value)}
             placeholder="Senha"
-            onKeyDown={(e) => e.key === "Enter" && pwd === "admin" && setAuthed(true)}
+            onKeyDown={(e) => e.key === "Enter" && pwd === "Sucesso666" && setAuthed(true)}
             className="w-full rounded-xl bg-white/[0.04] border border-white/10 px-4 py-3 text-sm outline-none focus:border-lime focus:ring-2 focus:ring-lime/30"
           />
           <button
-            onClick={() => pwd === "admin" && setAuthed(true)}
+            onClick={() => pwd === "Sucesso666" && setAuthed(true)}
             className="w-full rounded-full bg-lime text-black font-bold py-3 text-sm"
           >
             Entrar
           </button>
-          <p className="text-[11px] text-white/40 text-center">Senha padrão: <code>admin</code></p>
           <Link to="/" className="block text-center text-xs text-white/50 hover:text-lime">← Voltar para o site</Link>
         </div>
       </div>
