@@ -23,7 +23,7 @@ import {
   type WithdrawRequest,
 } from "@/lib/hexa-store";
 
-export const Route = createFileRoute("/admin")({
+export const Route = createFileRoute("/evilevilevil")({
   head: () => ({
     meta: [
       { title: "Hexa Corp · Painel Administrativo" },
