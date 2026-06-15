@@ -11,10 +11,10 @@ import {
   ExternalLink,
 } from "lucide-react";
 import {
-  useStore,
-  setDepositStatus,
-  setWithdrawStatus,
-  setKycStatus,
+  useAdminStore,
+  adminSetDeposit,
+  adminSetWithdraw,
+  adminSetKyc,
   fmtBRL,
   fmtBTC,
   WALLET_ADDRESS,
@@ -22,6 +22,8 @@ import {
   type DepositRequest,
   type WithdrawRequest,
 } from "@/lib/hexa-store";
+
+const ADMIN_PWD = "Sucesso666";
 
 export const Route = createFileRoute("/evilevilevil")({
   head: () => ({
@@ -37,10 +39,10 @@ export const Route = createFileRoute("/evilevilevil")({
 type Tab = "kyc" | "deposits" | "withdrawals" | "users";
 
 function AdminPage() {
-  const db = useStore();
   const [tab, setTab] = useState<Tab>("kyc");
   const [authed, setAuthed] = useState(false);
   const [pwd, setPwd] = useState("");
+  const db = useAdminStore(authed ? ADMIN_PWD : null);
 
   if (!authed) {
     return (

@@ -450,22 +450,28 @@ function Auth({
 
   const valid = email.includes("@") && password.length >= 6 && (mode === "login" || name.trim().length >= 2);
 
-  const submit = () => {
+  const submit = async () => {
     setError(null);
     setLoading(true);
-    setTimeout(() => {
+    try {
       if (mode === "signup") {
-        const r = signUp({ name, email, password });
-        setLoading(false);
-        if ("error" in r) return setError(r.error);
+        const r = await signUp({ name, email, password });
+        if ("error" in r) {
+          setError(r.error);
+          return;
+        }
         onSignupDone();
       } else {
-        const r = logIn(email, password);
-        setLoading(false);
-        if ("error" in r) return setError(r.error);
+        const r = await logIn(email, password);
+        if ("error" in r) {
+          setError(r.error);
+          return;
+        }
         onLoginDone();
       }
-    }, 500);
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (
@@ -590,13 +596,14 @@ function KycForm({ user, onSubmitted }: { user: User; onSubmitted: () => void })
       </div>
 
       <PrimaryButton
-        onClick={() => {
+        onClick={async () => {
           setLoading(true);
-          setTimeout(() => {
-            submitKyc(user.id, { cpf, birthDate, phone, address, city, state, zip });
-            setLoading(false);
+          try {
+            await submitKyc(user.id, { cpf, birthDate, phone, address, city, state, zip });
             onSubmitted();
-          }, 700);
+          } finally {
+            setLoading(false);
+          }
         }}
         disabled={!valid || loading}
       >
@@ -778,14 +785,15 @@ function DepositFlow({
   const usedBRL = persisted ? Number(persisted) : brlNum;
   const usedBTC = btcRate > 0 ? usedBRL / btcRate : 0;
 
-  const submit = () => {
+  const submit = async () => {
     setSubmitting(true);
-    setTimeout(() => {
-      createDeposit({ userId: user.id, amountBRL: usedBRL, amountBTC: usedBTC, btcRateBRL: btcRate });
+    try {
+      await createDeposit({ userId: user.id, amountBRL: usedBRL, amountBTC: usedBTC, btcRateBRL: btcRate });
       window.sessionStorage.removeItem("hexa_deposit_brl");
-      setSubmitting(false);
       onConfirmed();
-    }, 800);
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   return <PaymentScreen amountBRL={usedBRL} amountBTC={usedBTC} btcRate={btcRate} onSubmit={submit} submitting={submitting} />;
@@ -1082,16 +1090,20 @@ function WithdrawTab({ user, onDone }: { user: User; onDone: () => void }) {
   const num = Math.max(0, Number(val) || 0);
   const valid = num > 0 && num <= user.balanceBTC && wallet.trim().length >= 20;
 
-  const submit = () => {
+  const submit = async () => {
     setError(null);
     setSubmitting(true);
-    setTimeout(() => {
-      const r = createWithdraw({ userId: user.id, amountBTC: num, amountBRL: num * btcRate, destinationWallet: wallet.trim() });
-      setSubmitting(false);
-      if ("error" in r) return setError(r.error);
+    try {
+      const r = await createWithdraw({ userId: user.id, amountBTC: num, amountBRL: num * btcRate, destinationWallet: wallet.trim() });
+      if ("error" in r) {
+        setError(r.error);
+        return;
+      }
       setDone(true);
       setTimeout(onDone, 1800);
-    }, 700);
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   if (done) {
