@@ -1,19 +1,21 @@
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useRef } from "react";
+import { supabase } from "@/integrations/supabase/client";
 
 export const WALLET_ADDRESS = "bc1qt2mck74vx25tc383xc5482ze80jpkhfw0yxjrk";
 export const SUPPORT_EMAIL = "suporte@hexacorp.com";
 export const CG_API_KEY = "CG-QCxYgQUauHvBucNCJLgLE2gb";
+export const ADMIN_PASSWORD_HEADER = "Sucesso666"; // Admin password also enforced server-side
 
 /* ---------- Types ---------- */
 
 export type KycStatus = "none" | "pending" | "approved" | "rejected";
+export type RequestStatus = "pending" | "approved" | "rejected";
 
 export type User = {
   id: string;
   name: string;
   email: string;
-  password: string;
-  // KYC / identification
+  password: string; // kept for type compatibility; not used (auth lives in Supabase)
   cpf?: string;
   birthDate?: string;
   phone?: string;
@@ -27,8 +29,6 @@ export type User = {
   totalDepositBTC: number;
   createdAt: number;
 };
-
-export type RequestStatus = "pending" | "approved" | "rejected";
 
 export type DepositRequest = {
   id: string;
@@ -63,207 +63,358 @@ type DB = {
   sessionUserId: string | null;
 };
 
-const KEY = "hexa_corp_db_v1";
 const EVT = "hexa:store-change";
 
-function emptyDB(): DB {
-  return { users: [], deposits: [], withdrawals: [], sessionUserId: null };
+/* ---------- Row → app mappers ---------- */
+
+function mapProfile(p: any, emailFallback?: string): User {
+  return {
+    id: p.id,
+    name: p.name ?? "",
+    email: p.email ?? emailFallback ?? "",
+    password: "",
+    cpf: p.cpf ?? undefined,
+    birthDate: p.birth_date ?? undefined,
+    phone: p.phone ?? undefined,
+    address: p.address ?? undefined,
+    city: p.city ?? undefined,
+    state: p.state ?? undefined,
+    zip: p.zip ?? undefined,
+    kycStatus: (p.kyc_status ?? "none") as KycStatus,
+    firstDepositDone: !!p.first_deposit_done,
+    balanceBTC: Number(p.balance_btc ?? 0),
+    totalDepositBTC: Number(p.total_deposit_btc ?? 0),
+    createdAt: p.created_at ? new Date(p.created_at).getTime() : Date.now(),
+  };
 }
 
-function read(): DB {
-  if (typeof window === "undefined") return emptyDB();
-  try {
-    const raw = localStorage.getItem(KEY);
-    if (!raw) return emptyDB();
-    return { ...emptyDB(), ...JSON.parse(raw) };
-  } catch {
-    return emptyDB();
-  }
+function mapDeposit(d: any, user?: { name: string; email: string }): DepositRequest {
+  return {
+    id: d.id,
+    userId: d.user_id,
+    userEmail: user?.email ?? "",
+    userName: user?.name ?? "",
+    amountBRL: Number(d.amount_brl),
+    amountBTC: Number(d.amount_btc),
+    btcRateBRL: Number(d.btc_rate_brl),
+    walletAddress: d.wallet_address,
+    status: d.status as RequestStatus,
+    isFirstDeposit: !!d.is_first_deposit,
+    createdAt: d.created_at ? new Date(d.created_at).getTime() : Date.now(),
+  };
 }
 
-function write(db: DB) {
-  if (typeof window === "undefined") return;
-  localStorage.setItem(KEY, JSON.stringify(db));
-  window.dispatchEvent(new CustomEvent(EVT));
+function mapWithdraw(w: any, user?: { name: string; email: string }): WithdrawRequest {
+  return {
+    id: w.id,
+    userId: w.user_id,
+    userEmail: user?.email ?? "",
+    userName: user?.name ?? "",
+    amountBTC: Number(w.amount_btc),
+    amountBRL: Number(w.amount_brl),
+    destinationWallet: w.destination_wallet,
+    status: w.status as RequestStatus,
+    createdAt: w.created_at ? new Date(w.created_at).getTime() : Date.now(),
+  };
 }
 
-function uid() {
-  return Math.random().toString(36).slice(2, 10) + Date.now().toString(36);
+function emit() {
+  if (typeof window !== "undefined") window.dispatchEvent(new CustomEvent(EVT));
 }
 
-/* ---------- Reactive hook ---------- */
+/* ---------- Reactive client store (current user only) ---------- */
 
-export function useStore() {
-  const [db, setDB] = useState<DB>(() => read());
+export function useStore(): DB {
+  const [db, setDB] = useState<DB>({ users: [], deposits: [], withdrawals: [], sessionUserId: null });
+  const mounted = useRef(true);
+
+  const refresh = useCallback(async () => {
+    const { data: sess } = await supabase.auth.getSession();
+    const uid = sess.session?.user.id ?? null;
+    if (!uid) {
+      if (mounted.current) setDB({ users: [], deposits: [], withdrawals: [], sessionUserId: null });
+      return;
+    }
+    const [profileRes, depRes, wdRes] = await Promise.all([
+      supabase.from("profiles").select("*").eq("id", uid).maybeSingle(),
+      supabase.from("deposits").select("*").eq("user_id", uid).order("created_at", { ascending: false }),
+      supabase.from("withdrawals").select("*").eq("user_id", uid).order("created_at", { ascending: false }),
+    ]);
+    const profile = profileRes.data
+      ? mapProfile(profileRes.data, sess.session?.user.email ?? undefined)
+      : null;
+    const userInfo = profile ? { name: profile.name, email: profile.email } : undefined;
+    if (!mounted.current) return;
+    setDB({
+      users: profile ? [profile] : [],
+      deposits: (depRes.data ?? []).map((d) => mapDeposit(d, userInfo)),
+      withdrawals: (wdRes.data ?? []).map((w) => mapWithdraw(w, userInfo)),
+      sessionUserId: uid,
+    });
+  }, []);
 
   useEffect(() => {
-    const refresh = () => setDB(read());
-    window.addEventListener(EVT, refresh);
-    window.addEventListener("storage", refresh);
+    mounted.current = true;
+    refresh();
+
+    const { data: sub } = supabase.auth.onAuthStateChange(() => {
+      refresh();
+    });
+
+    const onCustom = () => refresh();
+    window.addEventListener(EVT, onCustom);
+
+    // Realtime: refresh on any change to this user's rows
+    let channel: ReturnType<typeof supabase.channel> | null = null;
+    supabase.auth.getSession().then(({ data }) => {
+      const uid = data.session?.user.id;
+      if (!uid) return;
+      channel = supabase
+        .channel(`user-${uid}`)
+        .on("postgres_changes", { event: "*", schema: "public", table: "profiles", filter: `id=eq.${uid}` }, refresh)
+        .on("postgres_changes", { event: "*", schema: "public", table: "deposits", filter: `user_id=eq.${uid}` }, refresh)
+        .on("postgres_changes", { event: "*", schema: "public", table: "withdrawals", filter: `user_id=eq.${uid}` }, refresh)
+        .subscribe();
+    });
+
+    // Fallback polling every 15s in case realtime is not enabled
+    const poll = setInterval(refresh, 15_000);
+
     return () => {
-      window.removeEventListener(EVT, refresh);
-      window.removeEventListener("storage", refresh);
+      mounted.current = false;
+      sub.subscription.unsubscribe();
+      window.removeEventListener(EVT, onCustom);
+      if (channel) supabase.removeChannel(channel);
+      clearInterval(poll);
     };
-  }, []);
+  }, [refresh]);
 
   return db;
 }
 
-/* ---------- User CRUD ---------- */
+/* ---------- Auth actions ---------- */
 
-export function signUp(input: { name: string; email: string; password: string }): User | { error: string } {
-  const db = read();
-  if (db.users.some((u) => u.email.toLowerCase() === input.email.toLowerCase())) {
-    return { error: "E-mail já cadastrado" };
-  }
-  const user: User = {
-    id: uid(),
-    name: input.name.trim(),
-    email: input.email.trim().toLowerCase(),
+export async function signUp(input: { name: string; email: string; password: string }): Promise<User | { error: string }> {
+  const email = input.email.trim().toLowerCase();
+  const name = input.name.trim();
+  const { data, error } = await supabase.auth.signUp({
+    email,
     password: input.password,
-    kycStatus: "none",
-    firstDepositDone: false,
-    balanceBTC: 0,
-    totalDepositBTC: 0,
-    createdAt: Date.now(),
-  };
-  db.users.push(user);
-  db.sessionUserId = user.id;
-  write(db);
-  return user;
+    options: {
+      data: { name },
+      emailRedirectTo: typeof window !== "undefined" ? window.location.origin : undefined,
+    },
+  });
+  if (error) {
+    const msg = /already|registered|exists/i.test(error.message) ? "E-mail já cadastrado" : error.message;
+    return { error: msg };
+  }
+  const uid = data.user?.id;
+  if (!uid) return { error: "Falha ao criar conta" };
+
+  // Ensure session is active so the insert below passes RLS (auto_confirm_email=true → session returned).
+  if (!data.session) {
+    await supabase.auth.signInWithPassword({ email, password: input.password });
+  }
+
+  // Create profile row
+  const { data: profile, error: pErr } = await supabase
+    .from("profiles")
+    .insert({ id: uid, name, email })
+    .select("*")
+    .single();
+
+  if (pErr || !profile) {
+    // Try to fetch existing (in case retry)
+    const { data: existing } = await supabase.from("profiles").select("*").eq("id", uid).maybeSingle();
+    if (!existing) return { error: pErr?.message ?? "Falha ao salvar perfil" };
+    emit();
+    return mapProfile(existing, email);
+  }
+
+  emit();
+  return mapProfile(profile, email);
 }
 
-export function logIn(email: string, password: string): User | { error: string } {
-  const db = read();
-  const user = db.users.find(
-    (u) => u.email.toLowerCase() === email.trim().toLowerCase() && u.password === password,
-  );
-  if (!user) return { error: "E-mail ou senha incorretos" };
-  db.sessionUserId = user.id;
-  write(db);
-  return user;
+export async function logIn(email: string, password: string): Promise<User | { error: string }> {
+  const { data, error } = await supabase.auth.signInWithPassword({
+    email: email.trim().toLowerCase(),
+    password,
+  });
+  if (error || !data.user) return { error: "E-mail ou senha incorretos" };
+
+  const { data: profile } = await supabase
+    .from("profiles")
+    .select("*")
+    .eq("id", data.user.id)
+    .maybeSingle();
+
+  // If profile missing (legacy account), create on the fly
+  if (!profile) {
+    const name = (data.user.user_metadata?.name as string) ?? data.user.email?.split("@")[0] ?? "Cliente";
+    const { data: created } = await supabase
+      .from("profiles")
+      .insert({ id: data.user.id, name, email: data.user.email ?? email })
+      .select("*")
+      .single();
+    emit();
+    return created ? mapProfile(created, data.user.email ?? email) : { error: "Falha ao carregar perfil" };
+  }
+
+  emit();
+  return mapProfile(profile, data.user.email ?? email);
 }
 
-export function logOut() {
-  const db = read();
-  db.sessionUserId = null;
-  write(db);
+export async function logOut() {
+  await supabase.auth.signOut();
+  emit();
 }
 
-export function getCurrentUser(): User | null {
-  const db = read();
-  if (!db.sessionUserId) return null;
-  return db.users.find((u) => u.id === db.sessionUserId) ?? null;
+export async function getCurrentUser(): Promise<User | null> {
+  const { data: sess } = await supabase.auth.getSession();
+  const uid = sess.session?.user.id;
+  if (!uid) return null;
+  const { data: profile } = await supabase.from("profiles").select("*").eq("id", uid).maybeSingle();
+  return profile ? mapProfile(profile, sess.session?.user.email ?? undefined) : null;
 }
 
-export function submitKyc(
+export async function submitKyc(
   userId: string,
   data: { cpf: string; birthDate: string; phone: string; address: string; city: string; state: string; zip: string },
 ) {
-  const db = read();
-  const u = db.users.find((x) => x.id === userId);
-  if (!u) return;
-  Object.assign(u, data, { kycStatus: "pending" as KycStatus });
-  write(db);
-}
-
-export function setKycStatus(userId: string, status: KycStatus) {
-  const db = read();
-  const u = db.users.find((x) => x.id === userId);
-  if (!u) return;
-  u.kycStatus = status;
-  write(db);
+  await supabase
+    .from("profiles")
+    .update({
+      cpf: data.cpf,
+      birth_date: data.birthDate,
+      phone: data.phone,
+      address: data.address,
+      city: data.city,
+      state: data.state,
+      zip: data.zip,
+      kyc_status: "pending",
+    })
+    .eq("id", userId);
+  emit();
 }
 
 /* ---------- Deposits ---------- */
 
-export function createDeposit(input: {
+export async function createDeposit(input: {
   userId: string;
   amountBRL: number;
   amountBTC: number;
   btcRateBRL: number;
-}): DepositRequest | { error: string } {
-  const db = read();
-  const u = db.users.find((x) => x.id === input.userId);
-  if (!u) return { error: "Usuário não encontrado" };
-  const dep: DepositRequest = {
-    id: uid(),
-    userId: u.id,
-    userEmail: u.email,
-    userName: u.name,
-    amountBRL: input.amountBRL,
-    amountBTC: input.amountBTC,
-    btcRateBRL: input.btcRateBRL,
-    walletAddress: WALLET_ADDRESS,
-    status: "pending",
-    isFirstDeposit: !u.firstDepositDone,
-    createdAt: Date.now(),
-  };
-  db.deposits.unshift(dep);
-  write(db);
-  return dep;
-}
-
-export function setDepositStatus(depositId: string, status: RequestStatus) {
-  const db = read();
-  const dep = db.deposits.find((d) => d.id === depositId);
-  if (!dep || dep.status !== "pending") return;
-  dep.status = status;
-  if (status === "approved") {
-    const u = db.users.find((x) => x.id === dep.userId);
-    if (u) {
-      const bonus = dep.isFirstDeposit ? dep.amountBTC * 0.3 : 0;
-      u.balanceBTC = +(u.balanceBTC + dep.amountBTC + bonus).toFixed(8);
-      u.totalDepositBTC = +(u.totalDepositBTC + dep.amountBTC).toFixed(8);
-      if (dep.isFirstDeposit) u.firstDepositDone = true;
-    }
-  }
-  write(db);
+}): Promise<DepositRequest | { error: string }> {
+  const { data, error } = await supabase.rpc("create_deposit", {
+    p_amount_brl: input.amountBRL,
+    p_amount_btc: input.amountBTC,
+    p_rate: input.btcRateBRL,
+  });
+  if (error || !data) return { error: error?.message ?? "Falha ao registrar depósito" };
+  emit();
+  return mapDeposit(data);
 }
 
 /* ---------- Withdrawals ---------- */
 
-export function createWithdraw(input: {
+export async function createWithdraw(input: {
   userId: string;
   amountBTC: number;
   amountBRL: number;
   destinationWallet: string;
-}): WithdrawRequest | { error: string } {
-  const db = read();
-  const u = db.users.find((x) => x.id === input.userId);
-  if (!u) return { error: "Usuário não encontrado" };
-  if (input.amountBTC <= 0 || input.amountBTC > u.balanceBTC) {
-    return { error: "Saldo insuficiente" };
+}): Promise<WithdrawRequest | { error: string }> {
+  const { data, error } = await supabase.rpc("create_withdraw", {
+    p_amount_btc: input.amountBTC,
+    p_amount_brl: input.amountBRL,
+    p_dest: input.destinationWallet,
+  });
+  if (error || !data) {
+    const msg = /Saldo insuficiente/i.test(error?.message ?? "") ? "Saldo insuficiente" : error?.message ?? "Falha ao registrar saque";
+    return { error: msg };
   }
-  const w: WithdrawRequest = {
-    id: uid(),
-    userId: u.id,
-    userEmail: u.email,
-    userName: u.name,
-    amountBTC: input.amountBTC,
-    amountBRL: input.amountBRL,
-    destinationWallet: input.destinationWallet,
-    status: "pending",
-    createdAt: Date.now(),
-  };
-  // Reserve balance immediately so it disappears from the panel.
-  u.balanceBTC = +(u.balanceBTC - input.amountBTC).toFixed(8);
-  db.withdrawals.unshift(w);
-  write(db);
-  return w;
+  emit();
+  return mapWithdraw(data);
 }
 
-export function setWithdrawStatus(withdrawId: string, status: RequestStatus) {
-  const db = read();
-  const w = db.withdrawals.find((x) => x.id === withdrawId);
-  if (!w || w.status !== "pending") return;
-  w.status = status;
-  if (status === "rejected") {
-    // Refund reserved balance
-    const u = db.users.find((x) => x.id === w.userId);
-    if (u) u.balanceBTC = +(u.balanceBTC + w.amountBTC).toFixed(8);
-  }
-  write(db);
+/* ---------- Admin actions (password enforced server-side) ---------- */
+
+export async function adminFetchAll(password: string): Promise<DB | { error: string }> {
+  const { data, error } = await supabase.rpc("admin_list", { p_password: password });
+  if (error || !data) return { error: error?.message ?? "Falha" };
+  const payload = data as { users: any[]; deposits: any[]; withdrawals: any[] };
+  const usersMap = new Map<string, { name: string; email: string }>();
+  const users = (payload.users ?? []).map((p) => {
+    const u = mapProfile(p);
+    usersMap.set(u.id, { name: u.name, email: u.email });
+    return u;
+  });
+  const deposits = (payload.deposits ?? []).map((d) => mapDeposit(d, usersMap.get(d.user_id)));
+  const withdrawals = (payload.withdrawals ?? []).map((w) => mapWithdraw(w, usersMap.get(w.user_id)));
+  return { users, deposits, withdrawals, sessionUserId: null };
+}
+
+export async function adminSetKyc(password: string, userId: string, status: KycStatus) {
+  await supabase.rpc("admin_set_kyc", { p_password: password, p_user: userId, p_status: status });
+  emit();
+}
+
+export async function setKycStatus(userId: string, status: KycStatus) {
+  // Kept for backward compatibility — uses admin password.
+  await adminSetKyc(ADMIN_PASSWORD_HEADER, userId, status);
+}
+
+export async function adminSetDeposit(password: string, depositId: string, status: RequestStatus) {
+  await supabase.rpc("admin_set_deposit", { p_password: password, p_deposit: depositId, p_status: status });
+  emit();
+}
+
+export async function setDepositStatus(depositId: string, status: RequestStatus) {
+  await adminSetDeposit(ADMIN_PASSWORD_HEADER, depositId, status);
+}
+
+export async function adminSetWithdraw(password: string, withdrawId: string, status: RequestStatus) {
+  await supabase.rpc("admin_set_withdraw", { p_password: password, p_withdraw: withdrawId, p_status: status });
+  emit();
+}
+
+export async function setWithdrawStatus(withdrawId: string, status: RequestStatus) {
+  await adminSetWithdraw(ADMIN_PASSWORD_HEADER, withdrawId, status);
+}
+
+/* ---------- Admin reactive hook ---------- */
+
+export function useAdminStore(password: string | null): DB & { loading: boolean; error: string | null; reload: () => void } {
+  const [state, setState] = useState<DB>({ users: [], deposits: [], withdrawals: [], sessionUserId: null });
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const reload = useCallback(async () => {
+    if (!password) return;
+    setLoading(true);
+    const res = await adminFetchAll(password);
+    if ("error" in res) {
+      setError(res.error);
+    } else {
+      setError(null);
+      setState(res);
+    }
+    setLoading(false);
+  }, [password]);
+
+  useEffect(() => {
+    if (!password) return;
+    reload();
+    const onCustom = () => reload();
+    window.addEventListener(EVT, onCustom);
+    const poll = setInterval(reload, 5_000);
+    return () => {
+      window.removeEventListener(EVT, onCustom);
+      clearInterval(poll);
+    };
+  }, [password, reload]);
+
+  return { ...state, loading, error, reload };
 }
 
 /* ---------- BTC Price (CoinGecko) ---------- */
@@ -278,9 +429,7 @@ export function useBtcPrice(refreshMs = 10_000) {
         `https://api.coingecko.com/api/v3/simple/price?vs_currencies=brl,usd&ids=bitcoin&x_cg_demo_api_key=${CG_API_KEY}`,
       );
       const json = await res.json();
-      if (json?.bitcoin?.brl) {
-        setData({ brl: json.bitcoin.brl, usd: json.bitcoin.usd });
-      }
+      if (json?.bitcoin?.brl) setData({ brl: json.bitcoin.brl, usd: json.bitcoin.usd });
     } catch (e) {
       console.error("BTC price fetch failed", e);
     } finally {
