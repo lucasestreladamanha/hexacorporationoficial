@@ -207,7 +207,6 @@ function Footer() {
     <footer className="relative mx-auto max-w-6xl w-full px-4 sm:px-5 py-8">
       <div className="border-t border-white/10 pt-6 flex flex-wrap items-center justify-between gap-3">
         <div className="font-mono-tag text-white/30">© 2026 HEXA CORP · TODOS OS DIREITOS RESERVADOS</div>
-        <Link to="/admin" className="font-mono-tag text-white/30 hover:text-lime transition">ADMIN →</Link>
       </div>
     </footer>
   );
