@@ -14,16 +14,214 @@ export type Database = {
   }
   public: {
     Tables: {
-      [_ in never]: never
+      deposits: {
+        Row: {
+          amount_brl: number
+          amount_btc: number
+          btc_rate_brl: number
+          created_at: string
+          id: string
+          is_first_deposit: boolean
+          status: Database["public"]["Enums"]["request_status"]
+          user_id: string
+          wallet_address: string
+        }
+        Insert: {
+          amount_brl: number
+          amount_btc: number
+          btc_rate_brl: number
+          created_at?: string
+          id?: string
+          is_first_deposit?: boolean
+          status?: Database["public"]["Enums"]["request_status"]
+          user_id: string
+          wallet_address: string
+        }
+        Update: {
+          amount_brl?: number
+          amount_btc?: number
+          btc_rate_brl?: number
+          created_at?: string
+          id?: string
+          is_first_deposit?: boolean
+          status?: Database["public"]["Enums"]["request_status"]
+          user_id?: string
+          wallet_address?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "deposits_user_id_fkey"
+            columns: ["user_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      profiles: {
+        Row: {
+          address: string | null
+          balance_btc: number
+          birth_date: string | null
+          city: string | null
+          cpf: string | null
+          created_at: string
+          email: string
+          first_deposit_done: boolean
+          id: string
+          kyc_status: Database["public"]["Enums"]["kyc_status"]
+          name: string
+          phone: string | null
+          state: string | null
+          total_deposit_btc: number
+          zip: string | null
+        }
+        Insert: {
+          address?: string | null
+          balance_btc?: number
+          birth_date?: string | null
+          city?: string | null
+          cpf?: string | null
+          created_at?: string
+          email: string
+          first_deposit_done?: boolean
+          id: string
+          kyc_status?: Database["public"]["Enums"]["kyc_status"]
+          name: string
+          phone?: string | null
+          state?: string | null
+          total_deposit_btc?: number
+          zip?: string | null
+        }
+        Update: {
+          address?: string | null
+          balance_btc?: number
+          birth_date?: string | null
+          city?: string | null
+          cpf?: string | null
+          created_at?: string
+          email?: string
+          first_deposit_done?: boolean
+          id?: string
+          kyc_status?: Database["public"]["Enums"]["kyc_status"]
+          name?: string
+          phone?: string | null
+          state?: string | null
+          total_deposit_btc?: number
+          zip?: string | null
+        }
+        Relationships: []
+      }
+      withdrawals: {
+        Row: {
+          amount_brl: number
+          amount_btc: number
+          created_at: string
+          destination_wallet: string
+          id: string
+          status: Database["public"]["Enums"]["request_status"]
+          user_id: string
+        }
+        Insert: {
+          amount_brl: number
+          amount_btc: number
+          created_at?: string
+          destination_wallet: string
+          id?: string
+          status?: Database["public"]["Enums"]["request_status"]
+          user_id: string
+        }
+        Update: {
+          amount_brl?: number
+          amount_btc?: number
+          created_at?: string
+          destination_wallet?: string
+          id?: string
+          status?: Database["public"]["Enums"]["request_status"]
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "withdrawals_user_id_fkey"
+            columns: ["user_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
     }
     Views: {
       [_ in never]: never
     }
     Functions: {
-      [_ in never]: never
+      admin_list: { Args: { p_password: string }; Returns: Json }
+      admin_set_deposit: {
+        Args: {
+          p_deposit: string
+          p_password: string
+          p_status: Database["public"]["Enums"]["request_status"]
+        }
+        Returns: undefined
+      }
+      admin_set_kyc: {
+        Args: {
+          p_password: string
+          p_status: Database["public"]["Enums"]["kyc_status"]
+          p_user: string
+        }
+        Returns: undefined
+      }
+      admin_set_withdraw: {
+        Args: {
+          p_password: string
+          p_status: Database["public"]["Enums"]["request_status"]
+          p_withdraw: string
+        }
+        Returns: undefined
+      }
+      create_deposit: {
+        Args: { p_amount_brl: number; p_amount_btc: number; p_rate: number }
+        Returns: {
+          amount_brl: number
+          amount_btc: number
+          btc_rate_brl: number
+          created_at: string
+          id: string
+          is_first_deposit: boolean
+          status: Database["public"]["Enums"]["request_status"]
+          user_id: string
+          wallet_address: string
+        }
+        SetofOptions: {
+          from: "*"
+          to: "deposits"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      create_withdraw: {
+        Args: { p_amount_brl: number; p_amount_btc: number; p_dest: string }
+        Returns: {
+          amount_brl: number
+          amount_btc: number
+          created_at: string
+          destination_wallet: string
+          id: string
+          status: Database["public"]["Enums"]["request_status"]
+          user_id: string
+        }
+        SetofOptions: {
+          from: "*"
+          to: "withdrawals"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
     }
     Enums: {
-      [_ in never]: never
+      kyc_status: "none" | "pending" | "approved" | "rejected"
+      request_status: "pending" | "approved" | "rejected"
     }
     CompositeTypes: {
       [_ in never]: never
@@ -150,6 +348,9 @@ export type CompositeTypes<
 
 export const Constants = {
   public: {
-    Enums: {},
+    Enums: {
+      kyc_status: ["none", "pending", "approved", "rejected"],
+      request_status: ["pending", "approved", "rejected"],
+    },
   },
 } as const
