@@ -308,7 +308,7 @@ export type MarketCoin = {
   price_change_percentage_24h: number;
 };
 
-export function useMarket(refreshMs = 60_000) {
+export function useMarket(refreshMs = 15_000) {
   const [coins, setCoins] = useState<MarketCoin[]>([]);
   const [loading, setLoading] = useState(true);
 
