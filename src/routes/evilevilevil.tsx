@@ -39,10 +39,10 @@ export const Route = createFileRoute("/evilevilevil")({
 type Tab = "kyc" | "deposits" | "withdrawals" | "users";
 
 function AdminPage() {
-  const db = useAdminStore(authed ? ADMIN_PWD : null);
   const [tab, setTab] = useState<Tab>("kyc");
   const [authed, setAuthed] = useState(false);
   const [pwd, setPwd] = useState("");
+  const db = useAdminStore(authed ? ADMIN_PWD : null);
 
   if (!authed) {
     return (
