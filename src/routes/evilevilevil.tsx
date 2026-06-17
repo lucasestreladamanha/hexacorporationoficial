@@ -44,6 +44,19 @@ function AdminPage() {
   const [pwd, setPwd] = useState("");
   const db = useAdminStore(authed ? ADMIN_PWD : null);
 
+  const handleKyc = async (userId: string, status: "approved" | "rejected") => {
+    try { await adminSetKyc(ADMIN_PWD, userId, status); db.reload(); }
+    catch (e) { alert("Erro: " + (e as Error).message); }
+  };
+  const handleDeposit = async (id: string, status: "approved" | "rejected") => {
+    try { await adminSetDeposit(ADMIN_PWD, id, status); db.reload(); }
+    catch (e) { alert("Erro: " + (e as Error).message); }
+  };
+  const handleWithdraw = async (id: string, status: "approved" | "rejected") => {
+    try { await adminSetWithdraw(ADMIN_PWD, id, status); db.reload(); }
+    catch (e) { alert("Erro: " + (e as Error).message); }
+  };
+
   if (!authed) {
     return (
       <div className="min-h-screen flex items-center justify-center p-4">
@@ -124,16 +137,16 @@ function AdminPage() {
           ))}
         </div>
 
-        {tab === "kyc" && <KycTab users={pendingKyc} />}
-        {tab === "deposits" && <DepositsTab deposits={pendingDeposits} allUsers={db.users} />}
-        {tab === "withdrawals" && <WithdrawalsTab withdrawals={pendingWithdrawals} />}
+        {tab === "kyc" && <KycTab users={pendingKyc} onAction={handleKyc} />}
+        {tab === "deposits" && <DepositsTab deposits={pendingDeposits} allUsers={db.users} onAction={handleDeposit} />}
+        {tab === "withdrawals" && <WithdrawalsTab withdrawals={pendingWithdrawals} allUsers={db.users} onAction={handleWithdraw} />}
         {tab === "users" && <UsersTab users={db.users} />}
       </div>
     </div>
   );
 }
 
-function KycTab({ users }: { users: User[] }) {
+function KycTab({ users, onAction }: { users: User[]; onAction: (id: string, s: "approved" | "rejected") => void }) {
   if (users.length === 0) return <Empty text="Nenhum cadastro pendente de aprovação." />;
   return (
     <div className="grid md:grid-cols-2 gap-4">
@@ -156,13 +169,13 @@ function KycTab({ users }: { users: User[] }) {
           </div>
           <div className="flex gap-2 pt-1">
             <button
-              onClick={() => setKycStatus(u.id, "approved")}
+              onClick={() => onAction(u.id, "approved")}
               className="flex-1 rounded-full bg-lime text-black font-bold py-2 text-sm flex items-center justify-center gap-1"
             >
               <Check className="h-4 w-4" /> Aprovar cadastro
             </button>
             <button
-              onClick={() => setKycStatus(u.id, "rejected")}
+              onClick={() => onAction(u.id, "rejected")}
               className="rounded-full border border-white/15 px-4 py-2 text-sm font-semibold hover:border-warning/60 hover:text-warning transition flex items-center gap-1"
             >
               <X className="h-4 w-4" /> Rejeitar
@@ -174,7 +187,7 @@ function KycTab({ users }: { users: User[] }) {
   );
 }
 
-function DepositsTab({ deposits, allUsers }: { deposits: DepositRequest[]; allUsers: User[] }) {
+function DepositsTab({ deposits, allUsers, onAction }: { deposits: DepositRequest[]; allUsers: User[]; onAction: (id: string, s: "approved" | "rejected") => void }) {
   if (deposits.length === 0) return <Empty text="Nenhum depósito pendente." />;
   return (
     <div className="space-y-3">
@@ -194,9 +207,7 @@ function DepositsTab({ deposits, allUsers }: { deposits: DepositRequest[]; allUs
                 {user && (
                   <span
                     className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ${
-                      user.kycStatus === "approved"
-                        ? "bg-lime/15 text-lime"
-                        : "bg-warning/15 text-warning"
+                      user.kycStatus === "approved" ? "bg-lime/15 text-lime" : "bg-warning/15 text-warning"
                     }`}
                   >
                     KYC: {user.kycStatus.toUpperCase()}
@@ -209,19 +220,20 @@ function DepositsTab({ deposits, allUsers }: { deposits: DepositRequest[]; allUs
                 <KV label="Cotação" v={fmtBRL(d.btcRateBRL)} />
                 <KV label="Solicitado em" v={new Date(d.createdAt).toLocaleString("pt-BR")} />
               </div>
+              {user && <KycDetails user={user} />}
               <div className="rounded-xl bg-black/40 border border-white/10 p-2 font-mono text-[11px] break-all text-white/80">
                 {d.walletAddress}
               </div>
             </div>
             <div className="flex md:flex-col gap-2 md:w-44">
               <button
-                onClick={() => setDepositStatus(d.id, "approved")}
+                onClick={() => onAction(d.id, "approved")}
                 className="flex-1 rounded-full bg-lime text-black font-bold py-2 text-sm flex items-center justify-center gap-1"
               >
                 <Check className="h-4 w-4" /> Aprovar
               </button>
               <button
-                onClick={() => setDepositStatus(d.id, "rejected")}
+                onClick={() => onAction(d.id, "rejected")}
                 className="flex-1 rounded-full border border-white/15 px-4 py-2 text-sm font-semibold hover:border-warning/60 hover:text-warning transition flex items-center justify-center gap-1"
               >
                 <X className="h-4 w-4" /> Rejeitar
@@ -234,11 +246,13 @@ function DepositsTab({ deposits, allUsers }: { deposits: DepositRequest[]; allUs
   );
 }
 
-function WithdrawalsTab({ withdrawals }: { withdrawals: WithdrawRequest[] }) {
+function WithdrawalsTab({ withdrawals, allUsers, onAction }: { withdrawals: WithdrawRequest[]; allUsers: User[]; onAction: (id: string, s: "approved" | "rejected") => void }) {
   if (withdrawals.length === 0) return <Empty text="Nenhum saque pendente." />;
   return (
     <div className="space-y-3">
-      {withdrawals.map((w) => (
+      {withdrawals.map((w) => {
+        const user = allUsers.find((u) => u.id === w.userId);
+        return (
         <div key={w.id} className="rounded-2xl glass p-5 grid md:grid-cols-[1fr_auto] gap-4 items-center">
           <div className="space-y-2">
             <div className="flex flex-wrap items-center gap-2">
@@ -250,6 +264,7 @@ function WithdrawalsTab({ withdrawals }: { withdrawals: WithdrawRequest[] }) {
               <KV label="≈ BRL" v={fmtBRL(w.amountBRL)} />
               <KV label="Solicitado em" v={new Date(w.createdAt).toLocaleString("pt-BR")} />
             </div>
+            {user && <KycDetails user={user} />}
             <div>
               <div className="font-mono-tag text-white/40 mb-1">CARTEIRA DE DESTINO</div>
               <div className="rounded-xl bg-black/40 border border-white/10 p-2 font-mono text-[11px] break-all text-white/85">
@@ -259,20 +274,34 @@ function WithdrawalsTab({ withdrawals }: { withdrawals: WithdrawRequest[] }) {
           </div>
           <div className="flex md:flex-col gap-2 md:w-44">
             <button
-              onClick={() => setWithdrawStatus(w.id, "approved")}
+              onClick={() => onAction(w.id, "approved")}
               className="flex-1 rounded-full bg-lime text-black font-bold py-2 text-sm flex items-center justify-center gap-1"
             >
               <Check className="h-4 w-4" /> Aprovar
             </button>
             <button
-              onClick={() => setWithdrawStatus(w.id, "rejected")}
+              onClick={() => onAction(w.id, "rejected")}
               className="flex-1 rounded-full border border-white/15 px-4 py-2 text-sm font-semibold hover:border-warning/60 hover:text-warning transition flex items-center justify-center gap-1"
             >
               <X className="h-4 w-4" /> Rejeitar
             </button>
           </div>
         </div>
-      ))}
+        );
+      })}
+    </div>
+  );
+}
+
+function KycDetails({ user }: { user: User }) {
+  return (
+    <div className="rounded-xl bg-white/[0.02] border border-white/10 p-3 grid grid-cols-2 sm:grid-cols-3 gap-2 text-xs">
+      <KV label="CPF" v={user.cpf} />
+      <KV label="Nascimento" v={user.birthDate} />
+      <KV label="Telefone" v={user.phone} />
+      <KV label="CEP" v={user.zip} />
+      <KV label="Cidade/UF" v={`${user.city ?? ""}${user.state ? " / " + user.state : ""}`} />
+      <KV label="Endereço" v={user.address} full />
     </div>
   );
 }
