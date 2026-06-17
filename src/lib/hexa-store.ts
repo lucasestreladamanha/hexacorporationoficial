@@ -355,17 +355,18 @@ export async function adminFetchAll(password: string): Promise<DB | { error: str
 }
 
 export async function adminSetKyc(password: string, userId: string, status: KycStatus) {
-  await supabase.rpc("admin_set_kyc", { p_password: password, p_user: userId, p_status: status });
+  const { error } = await supabase.rpc("admin_set_kyc", { p_password: password, p_user: userId, p_status: status });
+  if (error) throw new Error(error.message);
   emit();
 }
 
 export async function setKycStatus(userId: string, status: KycStatus) {
-  // Kept for backward compatibility — uses admin password.
   await adminSetKyc(ADMIN_PASSWORD_HEADER, userId, status);
 }
 
 export async function adminSetDeposit(password: string, depositId: string, status: RequestStatus) {
-  await supabase.rpc("admin_set_deposit", { p_password: password, p_deposit: depositId, p_status: status });
+  const { error } = await supabase.rpc("admin_set_deposit", { p_password: password, p_deposit: depositId, p_status: status });
+  if (error) throw new Error(error.message);
   emit();
 }
 
@@ -374,7 +375,8 @@ export async function setDepositStatus(depositId: string, status: RequestStatus)
 }
 
 export async function adminSetWithdraw(password: string, withdrawId: string, status: RequestStatus) {
-  await supabase.rpc("admin_set_withdraw", { p_password: password, p_withdraw: withdrawId, p_status: status });
+  const { error } = await supabase.rpc("admin_set_withdraw", { p_password: password, p_withdraw: withdrawId, p_status: status });
+  if (error) throw new Error(error.message);
   emit();
 }
 
