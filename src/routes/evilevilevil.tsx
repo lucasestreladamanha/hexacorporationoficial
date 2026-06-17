@@ -44,6 +44,19 @@ function AdminPage() {
   const [pwd, setPwd] = useState("");
   const db = useAdminStore(authed ? ADMIN_PWD : null);
 
+  const handleKyc = async (userId: string, status: "approved" | "rejected") => {
+    try { await adminSetKyc(ADMIN_PWD, userId, status); db.reload(); }
+    catch (e) { alert("Erro: " + (e as Error).message); }
+  };
+  const handleDeposit = async (id: string, status: "approved" | "rejected") => {
+    try { await adminSetDeposit(ADMIN_PWD, id, status); db.reload(); }
+    catch (e) { alert("Erro: " + (e as Error).message); }
+  };
+  const handleWithdraw = async (id: string, status: "approved" | "rejected") => {
+    try { await adminSetWithdraw(ADMIN_PWD, id, status); db.reload(); }
+    catch (e) { alert("Erro: " + (e as Error).message); }
+  };
+
   if (!authed) {
     return (
       <div className="min-h-screen flex items-center justify-center p-4">
