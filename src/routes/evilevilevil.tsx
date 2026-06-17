@@ -146,7 +146,7 @@ function AdminPage() {
   );
 }
 
-function KycTab({ users }: { users: User[] }) {
+function KycTab({ users, onAction }: { users: User[]; onAction: (id: string, s: "approved" | "rejected") => void }) {
   if (users.length === 0) return <Empty text="Nenhum cadastro pendente de aprovação." />;
   return (
     <div className="grid md:grid-cols-2 gap-4">
@@ -169,13 +169,13 @@ function KycTab({ users }: { users: User[] }) {
           </div>
           <div className="flex gap-2 pt-1">
             <button
-              onClick={() => setKycStatus(u.id, "approved")}
+              onClick={() => onAction(u.id, "approved")}
               className="flex-1 rounded-full bg-lime text-black font-bold py-2 text-sm flex items-center justify-center gap-1"
             >
               <Check className="h-4 w-4" /> Aprovar cadastro
             </button>
             <button
-              onClick={() => setKycStatus(u.id, "rejected")}
+              onClick={() => onAction(u.id, "rejected")}
               className="rounded-full border border-white/15 px-4 py-2 text-sm font-semibold hover:border-warning/60 hover:text-warning transition flex items-center gap-1"
             >
               <X className="h-4 w-4" /> Rejeitar
