@@ -137,9 +137,9 @@ function AdminPage() {
           ))}
         </div>
 
-        {tab === "kyc" && <KycTab users={pendingKyc} />}
-        {tab === "deposits" && <DepositsTab deposits={pendingDeposits} allUsers={db.users} />}
-        {tab === "withdrawals" && <WithdrawalsTab withdrawals={pendingWithdrawals} />}
+        {tab === "kyc" && <KycTab users={pendingKyc} onAction={handleKyc} />}
+        {tab === "deposits" && <DepositsTab deposits={pendingDeposits} allUsers={db.users} onAction={handleDeposit} />}
+        {tab === "withdrawals" && <WithdrawalsTab withdrawals={pendingWithdrawals} allUsers={db.users} onAction={handleWithdraw} />}
         {tab === "users" && <UsersTab users={db.users} />}
       </div>
     </div>
